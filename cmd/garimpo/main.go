@@ -3,10 +3,13 @@ package main
 
 import (
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"os"
 	"runtime"
+
+	"github.com/aluiziodeveloper/garimpo/internal/adapters/corpus"
 )
 
 // version is replaced at build time in the release module (-ldflags "-X main.version=...").
@@ -28,7 +31,29 @@ func run(args []string, out io.Writer) error {
 	case "version":
 		_, err := fmt.Fprintf(out, "garimpo %s (%s)\n", version, runtime.Version())
 		return err
+	case "scan":
+		return scan(args[1:], out)
 	default:
 		return fmt.Errorf("unknown command %q", args[0])
 	}
+}
+
+// scan reads the corpus one document at a time and prints how many documents and bytes it
+// has. It holds one document at a time, never the whole corpus.
+func scan(args []string, out io.Writer) error {
+	fl := flag.NewFlagSet("scan", flag.ContinueOnError)
+	dir := fl.String("corpus", "/usr/local/go/src", "the corpus directory")
+	if err := fl.Parse(args); err != nil {
+		return err
+	}
+	docs, size := 0, 0
+	for d, err := range corpus.Walk(os.DirFS(*dir)) {
+		if err != nil {
+			return fmt.Errorf("scan %s: %w", *dir, err)
+		}
+		docs++
+		size += len(d.Text())
+	}
+	_, err := fmt.Fprintf(out, "documents=%d bytes=%d\n", docs, size)
+	return err
 }

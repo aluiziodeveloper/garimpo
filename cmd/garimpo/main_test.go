@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -35,5 +37,36 @@ func TestRun(t *testing.T) {
 				t.Errorf("run(%q) output = %q, want %q", tt.args, got, tt.wantOut)
 			}
 		})
+	}
+}
+
+func TestScanCountsTheLibrarySources(t *testing.T) {
+	dir := t.TempDir()
+	for name, text := range map[string]string{
+		"bytes/bytes.go":      "package bytes\n",
+		"bytes/bytes_test.go": "package bytes\n",
+		"strings/strings.go":  "package strings\n\nfunc F() {}\n",
+	} {
+		p := filepath.Join(dir, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(text), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var out bytes.Buffer
+	if err := run([]string{"scan", "-corpus", dir}, &out); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := out.String(), "documents=2 bytes=43\n"; got != want {
+		t.Errorf("scan output = %q, want %q", got, want)
+	}
+}
+
+func TestScanReportsAMissingCorpus(t *testing.T) {
+	err := run([]string{"scan", "-corpus", filepath.Join(t.TempDir(), "nope")}, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "no such file or directory") {
+		t.Errorf("scan of a missing corpus: error = %v", err)
 	}
 }
