@@ -10,6 +10,7 @@ import (
 	"runtime"
 
 	"github.com/aluiziodeveloper/garimpo/internal/adapters/corpus"
+	ingest "github.com/aluiziodeveloper/garimpo/internal/app/ingestion"
 	"github.com/aluiziodeveloper/garimpo/internal/domain/ingestion"
 )
 
@@ -39,9 +40,8 @@ func run(args []string, out io.Writer) error {
 	}
 }
 
-// scan reads the corpus one document at a time, cuts each one into chunks and prints how
-// many documents, bytes and chunks it has, and the size of the largest chunk. It holds one document at a time, never the
-// whole corpus.
+// scan reads the corpus one document at a time, cuts each one into chunks and prints the
+// survey: how many documents, bytes and chunks it has, and the size of the largest chunk.
 func scan(args []string, out io.Writer) error {
 	fl := flag.NewFlagSet("scan", flag.ContinueOnError)
 	dir := fl.String("corpus", "/usr/local/go/src", "the corpus directory")
@@ -53,23 +53,10 @@ func scan(args []string, out io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("scan: %w", err)
 	}
-	docs, size, chunks, largest := 0, 0, 0, 0
-	for d, err := range corpus.Walk(os.DirFS(*dir)) {
-		if err != nil {
-			return fmt.Errorf("scan %s: %w", *dir, err)
-		}
-		docs++
-		size += len(d.Text())
-		for c := range cutter.Cut(d) {
-			chunks++
-			largest = max(largest, len(c.Text()))
-		}
+	survey, err := ingest.SurveyCorpus(corpus.Walk(os.DirFS(*dir)), cutter)
+	if err != nil {
+		return fmt.Errorf("scan %s: %w", *dir, err)
 	}
-	average := 0
-	if chunks > 0 {
-		average = size / chunks
-	}
-	_, err = fmt.Fprintf(out, "documents=%d bytes=%d chunks=%d average=%d largest=%d\n",
-		docs, size, chunks, average, largest)
+	_, err = fmt.Fprintln(out, survey)
 	return err
 }
