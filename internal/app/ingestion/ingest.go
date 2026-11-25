@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"iter"
+	"sync"
 
 	"golang.org/x/sync/errgroup"
 
@@ -24,6 +25,7 @@ type Embed func(ctx context.Context, c domain.Chunk) error
 // Config is what RunIngestion runs with.
 type Config struct {
 	Cutter  domain.Cutter
+	Cutters int   // goroutines cutting documents; zero means 1
 	Workers int   // goroutines calling Embed; at least 1
 	Embed   Embed // required
 	// MaxPending is the most chunks cut and not yet embedded or failed (RN03): when it is
@@ -51,9 +53,12 @@ type change func(*domain.Run) error
 // it changes. A read error or a canceled ctx fails the run and is returned; a chunk the
 // embedder fails is recorded and the run goes on.
 func RunIngestion(ctx context.Context, run *domain.Run, docs iter.Seq2[domain.Document, error], cfg Config) error {
-	if cfg.Workers < 1 || cfg.Embed == nil || cfg.MaxPending < 0 {
-		return fmt.Errorf("%w: %d workers, max pending %d, embedder set: %t",
-			ErrInvalidConfig, cfg.Workers, cfg.MaxPending, cfg.Embed != nil)
+	if cfg.Workers < 1 || cfg.Embed == nil || cfg.MaxPending < 0 || cfg.Cutters < 0 {
+		return fmt.Errorf("%w: %d cutters, %d workers, max pending %d, embedder set: %t",
+			ErrInvalidConfig, cfg.Cutters, cfg.Workers, cfg.MaxPending, cfg.Embed != nil)
+	}
+	if cfg.Cutters == 0 {
+		cfg.Cutters = 1
 	}
 	if cfg.MaxPending == 0 {
 		cfg.MaxPending = DefaultMaxPending
@@ -86,34 +91,45 @@ func RunIngestion(ctx context.Context, run *domain.Run, docs iter.Seq2[domain.Do
 	// slots make the count exact, chunks in the workers' hands included.
 	pending := make(chan struct{}, cfg.MaxPending) // one slot per chunk in flight
 	cut := make(chan domain.Chunk, cfg.MaxPending)
-	g.Go(func() error { // stage 1: read and cut
-		defer close(cut)
+
+	// stage 1: read. An iterator is not safe for several goroutines, so one reads.
+	read := make(chan domain.Document)
+	g.Go(func() error {
+		defer close(read)
 		for d, err := range docs {
 			if err != nil {
 				return err
 			}
-			cfg.Progress.DocumentRead()
-			if err := send(func(r *domain.Run) error { return r.DiscoverDocument(d) }); err != nil {
-				return err
-			}
-			for c := range cfg.Cutter.Cut(d) {
-				select {
-				case pending <- struct{}{}: // waits while MaxPending chunks are in flight
-				case <-ctx.Done():
-					return ctx.Err()
-				}
-				cfg.Progress.ChunksCut(1)
-				select {
-				case cut <- c:
-				case <-ctx.Done():
-					return ctx.Err()
-				}
+			select {
+			case read <- d:
+			case <-ctx.Done():
+				return ctx.Err()
 			}
 		}
 		return nil
 	})
 
-	for range cfg.Workers { // stage 2: embed
+	// stage 2: cut, on cfg.Cutters goroutines; the last one to finish closes cut.
+	var cutting sync.WaitGroup
+	for range cfg.Cutters {
+		cutting.Add(1)
+		g.Go(func() error {
+			defer cutting.Done()
+			for d := range read {
+				if err := cutDocument(ctx, cfg, d, pending, cut, send); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+	}
+	g.Go(func() error {
+		cutting.Wait()
+		close(cut)
+		return nil
+	})
+
+	for range cfg.Workers { // stage 3: embed
 		g.Go(func() error {
 			for c := range cut {
 				err := embed(ctx, cfg, c, send)
@@ -158,6 +174,31 @@ func RunIngestion(ctx context.Context, run *domain.Run, docs iter.Seq2[domain.Do
 		return err
 	}
 	cfg.Record(run.TakeEvents())
+	return nil
+}
+
+// cutDocument records d and sends its chunks to cut, each one after taking a slot of
+// pending (RN03).
+func cutDocument(ctx context.Context, cfg Config, d domain.Document, pending chan struct{},
+	cut chan<- domain.Chunk, send func(change) error,
+) error {
+	cfg.Progress.DocumentRead()
+	if err := send(func(r *domain.Run) error { return r.DiscoverDocument(d) }); err != nil {
+		return err
+	}
+	for c := range cfg.Cutter.Cut(d) {
+		select {
+		case pending <- struct{}{}: // waits while MaxPending chunks are in flight
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+		cfg.Progress.ChunksCut(1)
+		select {
+		case cut <- c:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
 	return nil
 }
 
