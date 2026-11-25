@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint and format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          # Only this job caches: the three jobs would race for the same cache key, and the
+          # one that compiles golangci-lint is the one that needs it.
+          cache-dependency-path: tools/go.sum
+      - name: Format (gofumpt)
+        run: go tool -modfile=tools/go.mod golangci-lint fmt --diff
+      - name: Lint
+        run: go tool -modfile=tools/go.mod golangci-lint run
+
+  test:
+    name: Tests (race)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Test with the race detector
+        run: go test -race -count=1 ./...
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Build
+        run: go build ./...
