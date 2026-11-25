@@ -25,6 +25,30 @@ belong to you. If your user has other IDs (`id -u`, `id -g`), build with them:
 UID=$(id -u) GID=$(id -g) docker compose build dev
 ```
 
+## Local models (Ollama)
+
+Garimpo talks to a local [Ollama](https://ollama.com) (`ollama/ollama:0.40.16`), the `ollama`
+service in `compose.yaml`. It publishes no ports: the `dev` container reaches it at
+`http://ollama:11434` (`GARIMPO_OLLAMA_URL`). The models live in the `ollama-models` volume,
+so they are downloaded once:
+
+```bash
+docker compose up -d --wait ollama
+docker compose exec ollama ollama pull all-minilm:22m   # embeddings, 384 dimensions
+docker compose exec ollama ollama pull qwen2.5:1.5b     # generation
+```
+
+Ollama gets `OLLAMA_CPUS` CPUs (default 4). It does not read that limit from the cgroup: it
+sizes its thread pool from the host CPUs, so every request sends `num_thread` with the same
+number (`GARIMPO_OLLAMA_NUM_THREAD`, set from the same variable). Keep it fixed: a request
+with a different `num_thread` reloads the model.
+
+```bash
+docker compose exec dev sh -c 'curl -s $GARIMPO_OLLAMA_URL/api/generate -d "{\"model\":\"qwen2.5:1.5b\",\"prompt\":\"Explain what a goroutine is in one sentence.\",\"stream\":false,\"options\":{\"temperature\":0,\"num_predict\":32,\"num_thread\":$GARIMPO_OLLAMA_NUM_THREAD}}"'
+```
+
+To give Ollama more CPUs, change the variable for both services: `OLLAMA_CPUS=8 docker compose up -d`.
+
 ## Checks
 
 The same commands run in CI on every pull request:
@@ -66,7 +90,7 @@ GitHub Actions, with titles that pass the same check.
 |---|---|
 | `cmd/garimpo` | The binary: argument handling and wiring |
 | `docker/dev.Dockerfile` | The development container (Go 1.27.4) |
-| `compose.yaml` | Local services |
+| `compose.yaml` | Local services: `dev` and `ollama` |
 | `tools/go.mod` | Pinned development tools (`go tool -modfile=tools/go.mod …`) |
 | `.golangci.yml` | Linters and formatter |
 | `.github/workflows/ci.yml` | CI: format, lint, race tests, build |

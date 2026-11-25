@@ -1,5 +1,9 @@
 name: garimpo
 
+# One knob for the Ollama CPUs. Ollama does not read the cgroup limit: it sizes its thread
+# pool from the host CPUs, so every request must send num_thread with the same number.
+x-ollama-cpus: &ollama-cpus ${OLLAMA_CPUS:-4}
+
 services:
   dev:
     build:
@@ -9,6 +13,9 @@ services:
         UID: ${UID:-1000}
         GID: ${GID:-1000}
     working_dir: /src
+    environment:
+      GARIMPO_OLLAMA_URL: http://ollama:11434
+      GARIMPO_OLLAMA_NUM_THREAD: *ollama-cpus
     volumes:
       - .:/src
       - go-mod:/go/pkg/mod
@@ -16,6 +23,22 @@ services:
     init: true
     command: sleep infinity
 
+  ollama:
+    image: ollama/ollama:0.40.16
+    cpus: *ollama-cpus
+    environment:
+      OLLAMA_NUM_PARALLEL: 4
+      OLLAMA_KEEP_ALIVE: 30m
+    # No published ports: the dev container reaches it at http://ollama:11434.
+    volumes:
+      - ollama-models:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
 volumes:
   go-mod:
   go-build:
+  ollama-models:
