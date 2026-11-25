@@ -13,7 +13,9 @@ the lessons use the Portuguese word in parentheses.
 | Term | Meaning | First seen |
 |---|---|---|
 | **corpus** (acervo) | The files Garimpo answers about: in the course, the Go standard library in the `golang` image | 03-01 |
+| **document** (documento) | One file of the corpus: a relative, slash-separated path and valid UTF-8 text (`ingestion.Document`) | 06-06 |
 | **chunk** (trecho) | A line range of one corpus file, the unit that is embedded, indexed and cited | 03-01 |
+| **window** (janela) | The most bytes a chunk holds: 700 by default (D15). Chunks take whole lines; only a line longer than the window is split, never inside a character (`ingestion.Cutter`) | 06-07 |
 | **`ChunkID`** | The SHA-256 of a chunk's path, line range and text: the same chunk has the same ID in every run (RN02) | 03-06 |
 | **vector** (vetor) | A chunk's embedding: the model's dimension and norm 1 (RN07), so a dot product is a cosine similarity | 03-07 |
 | **score** (nota) | How close a chunk is to a query: the dot product of their vectors, between -1 and 1 | 03-07 |
@@ -39,6 +41,7 @@ the lessons use the Portuguese word in parentheses.
 | **invariant** | A rule that holds for every value of a type, such as norm 1 for `Vector` | 03-07 |
 | **zero value** | What a variable holds before any assignment. In the value objects it means "none" and is safe to use (`IsZero`) | 03-06 |
 | **property test** | A test that checks a rule on many generated inputs instead of a few examples (`testing/quick`) | 03-09 |
+| **fuzzing** | A property test whose inputs Go generates and mutates, guided by coverage (`go test -fuzz`). A failing input is saved under `testdata/fuzz` and runs as a test from then on | 06-08 |
 
 ## Go and runtime
 
@@ -75,6 +78,12 @@ the lessons use the Portuguese word in parentheses.
 | **`noCopy`** | A field of the atomic and `sync` types that makes `go vet` (copylocks) report a copy, such as passing a `Progress` by value | 05-07 |
 | **false sharing** | Goroutines writing different variables on the same 64-byte cache line, which slows them down as if they shared one | 05-06 |
 | **check-then-act** | Reading a value and acting on it as two steps: correct for one goroutine, wrong for two even when both steps are atomic (`sync.Once` does it in one) | 05-04 |
+| **range-over-func** | Since Go 1.23, `for v := range f` with a function `f(yield func(V) bool)`: the loop body becomes `yield`, and `break` makes `yield` return false | 06-02 |
+| **iterator** (`iter.Seq`, `iter.Seq2`) | A function that pushes the values of a sequence to `yield`, one at a time, and stops when `yield` returns false. Calling `yield` again after false panics | 06-02 |
+| **pull iterator** (`iter.Pull`) | A push iterator turned into `next` and `stop` calls, so two sequences can be walked side by side. Each `next` switches goroutines: about 69 ns per value against 1 ns for a push iterator (lesson 06-04). `stop` must be called | 06-03 |
+| **single-use iterator** | An iterator over a stream that cannot be rewound, such as lines read from a connection: calling it again does not start over. Its doc comment says so | 06-03 |
+| **generic method** | Since Go 1.27, a method with type parameters of its own, such as `Map[W any]` on `Seq[V]`. It must be instantiated before use as a value, and it satisfies no interface | 06-05 |
+| **peak live heap** | The largest heap the garbage collector found alive during a run, sampled from `/gc/heap/live:bytes` (`runtime/metrics`) | 06-10 |
 
 ## Infrastructure
 
