@@ -12,6 +12,7 @@ import (
 	"github.com/aluiziodeveloper/garimpo/internal/adapters/corpus"
 	ingest "github.com/aluiziodeveloper/garimpo/internal/app/ingestion"
 	"github.com/aluiziodeveloper/garimpo/internal/domain/ingestion"
+	"github.com/aluiziodeveloper/garimpo/internal/domain/shared"
 )
 
 // BenchmarkRunIngestion runs the ingestion over the whole corpus with an embedder that
@@ -28,20 +29,14 @@ func BenchmarkRunIngestion(b *testing.B) {
 		b.Run(fmt.Sprintf("max-pending=%d", limit), func(b *testing.B) {
 			var peak atomic.Int64
 			var progress *ingest.Progress
-			embed := func(ctx context.Context, _ ingestion.Chunk) error {
+			embedder := &slowEmbedder{wait: 20 * time.Microsecond, seen: func() {
 				for p := progress.Snapshot().Pending(); ; { // keep the largest, without a lock (05-05)
 					old := peak.Load()
 					if p <= old || peak.CompareAndSwap(old, p) {
 						break
 					}
 				}
-				select {
-				case <-time.After(20 * time.Microsecond):
-					return nil
-				case <-ctx.Done():
-					return ctx.Err()
-				}
-			}
+			}}
 			b.ReportAllocs()
 			runtime.GC()
 			stop := watchLiveHeap()
@@ -51,7 +46,7 @@ func BenchmarkRunIngestion(b *testing.B) {
 					b.Fatal(err)
 				}
 				progress = new(ingest.Progress)
-				cfg := ingest.Config{Workers: 8, MaxPending: limit, Embed: embed, Progress: progress}
+				cfg := ingest.Config{Workers: 8, MaxPending: limit, Embedder: embedder, Progress: progress}
 				if err := ingest.RunIngestion(b.Context(), run, corpus.Walk(fsys), cfg); err != nil {
 					b.Fatal(err)
 				}
@@ -60,4 +55,27 @@ func BenchmarkRunIngestion(b *testing.B) {
 			b.ReportMetric(float64(peak.Load()), "peak-pending")
 		})
 	}
+}
+
+// slowEmbedder waits before returning one copy of the same vector per text, and calls
+// seen first: a model with a fixed cost and no CPU of its own.
+type slowEmbedder struct {
+	wait time.Duration
+	seen func()
+}
+
+var benchVector, _ = shared.NewVector([]float32{1}, 1)
+
+func (e *slowEmbedder) Embed(ctx context.Context, texts []string) ([]shared.Vector, error) {
+	e.seen()
+	select {
+	case <-time.After(e.wait):
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	vs := make([]shared.Vector, len(texts))
+	for i := range vs {
+		vs[i] = benchVector
+	}
+	return vs, nil
 }

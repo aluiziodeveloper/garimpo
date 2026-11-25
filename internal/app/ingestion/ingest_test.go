@@ -13,24 +13,35 @@ import (
 	"github.com/aluiziodeveloper/garimpo/internal/domain/shared"
 )
 
-// fakeEmbedder records the chunks it was given. fail, when set, decides which ones fail.
+// fakeEmbedder counts the texts it was given, by text. fail, when set, decides which
+// ones fail. Every vector it returns is the same: these tests are about the pipeline.
 type fakeEmbedder struct {
-	mu   sync.Mutex
-	seen map[shared.ChunkID]int
-	fail func(domain.Chunk) error
+	mu    sync.Mutex
+	seen  map[string]int
+	total int
+	fail  func(text string) error
 }
 
-func (f *fakeEmbedder) embed(_ context.Context, c domain.Chunk) error {
+var oneVector, _ = shared.NewVector([]float32{1}, 1)
+
+func (f *fakeEmbedder) Embed(_ context.Context, texts []string) ([]shared.Vector, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.seen == nil {
-		f.seen = make(map[shared.ChunkID]int)
+		f.seen = make(map[string]int)
 	}
-	f.seen[c.ID()]++
-	if f.fail != nil {
-		return f.fail(c)
+	vs := make([]shared.Vector, len(texts))
+	for i, text := range texts {
+		f.seen[text]++
+		f.total++
+		if f.fail != nil {
+			if err := f.fail(text); err != nil {
+				return nil, err
+			}
+		}
+		vs[i] = oneVector
 	}
-	return nil
+	return vs, nil
 }
 
 // setup returns a pending run and a configuration that cuts with a 10-byte window, embeds
@@ -48,7 +59,7 @@ func setup(t *testing.T, f *fakeEmbedder, events *[]domain.Event) (*domain.Run, 
 	return run, Config{
 		Cutter:   cutter,
 		Workers:  3,
-		Embed:    f.embed,
+		Embedder: f,
 		Progress: new(Progress),
 		Record:   func(e []domain.Event) { *events = append(*events, e...) },
 	}
@@ -69,9 +80,9 @@ func TestRunIngestionEmbedsEveryChunkOnce(t *testing.T) {
 	if len(f.seen) != 3 {
 		t.Fatalf("embedded %d chunks, want 3", len(f.seen))
 	}
-	for id, n := range f.seen {
+	for text, n := range f.seen {
 		if n != 1 {
-			t.Errorf("chunk %s embedded %d times", id, n)
+			t.Errorf("chunk %q embedded %d times", text, n)
 		}
 	}
 	want := Counts{Documents: 3, Chunks: 3, Embedded: 3}
@@ -93,8 +104,8 @@ func TestRunIngestionEmbedsEveryChunkOnce(t *testing.T) {
 var errModel = errors.New("model unavailable")
 
 func TestAFailedChunkDoesNotStopTheRun(t *testing.T) {
-	f := fakeEmbedder{fail: func(c domain.Chunk) error {
-		if c.Path() == "b.go" {
+	f := fakeEmbedder{fail: func(text string) error {
+		if text == "bbbb\n" {
 			return errModel
 		}
 		return nil
@@ -137,7 +148,7 @@ func TestAReadErrorFailsTheRun(t *testing.T) {
 
 func TestCancelingFailsTheRun(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
-	f := fakeEmbedder{fail: func(domain.Chunk) error { cancel(); return nil }}
+	f := fakeEmbedder{fail: func(string) error { cancel(); return nil }}
 	var events []domain.Event
 	run, cfg := setup(t, &f, &events)
 	texts := make([]string, 100)
@@ -186,7 +197,7 @@ func TestRunIngestionNeedsAWorkerAndAnEmbedder(t *testing.T) {
 	var events []domain.Event
 	for _, broken := range []func(*Config){
 		func(c *Config) { c.Workers = 0 },
-		func(c *Config) { c.Embed = nil },
+		func(c *Config) { c.Embedder = nil },
 	} {
 		run, cfg := setup(t, &f, &events)
 		broken(&cfg)
@@ -214,7 +225,7 @@ func oneLiners(t *testing.T, n int) iter.Seq2[domain.Document, error] {
 func TestRunIngestionNeverHoldsMoreThanMaxPending(t *testing.T) {
 	var cfg Config
 	var most int64
-	f := fakeEmbedder{fail: func(domain.Chunk) error {
+	f := fakeEmbedder{fail: func(string) error {
 		most = max(most, cfg.Progress.Snapshot().Pending())
 		time.Sleep(time.Millisecond) // a slow model: the cutter gets ahead
 		return nil
@@ -243,8 +254,8 @@ func TestAMaxPendingOfOneStillCompletes(t *testing.T) {
 	if err := RunIngestion(t.Context(), run, oneLiners(t, 50), cfg); err != nil {
 		t.Fatal(err)
 	}
-	if run.State() != domain.Completed || len(f.seen) != 50 {
-		t.Fatalf("run %s with %d chunks embedded, want completed with 50", run.State(), len(f.seen))
+	if run.State() != domain.Completed || f.total != 50 {
+		t.Fatalf("run %s with %d chunks embedded, want completed with 50", run.State(), f.total)
 	}
 }
 
@@ -255,5 +266,24 @@ func TestANegativeMaxPendingIsRejected(t *testing.T) {
 	cfg.MaxPending = -1
 	if err := RunIngestion(t.Context(), run, oneLiners(t, 1), cfg); !errors.Is(err, ErrInvalidConfig) {
 		t.Fatalf("err = %v, want ErrInvalidConfig", err)
+	}
+}
+
+// lossyEmbedder breaks the contract: it returns no vector and no error.
+type lossyEmbedder struct{}
+
+func (lossyEmbedder) Embed(context.Context, []string) ([]shared.Vector, error) { return nil, nil }
+
+func TestAnEmbedderThatBreaksItsContractFailsTheRun(t *testing.T) {
+	var events []domain.Event
+	run, cfg := setup(t, new(fakeEmbedder), &events)
+	cfg.Embedder = lossyEmbedder{}
+
+	err := RunIngestion(t.Context(), run, documents(t, nil, "aaaa\n"), cfg)
+	if !errors.Is(err, ErrBrokenEmbedder) {
+		t.Fatalf("err = %v, want ErrBrokenEmbedder", err)
+	}
+	if run.State() != domain.Failed {
+		t.Fatalf("run is %s, want failed: a lost vector is a bug, not a failed chunk", run.State())
 	}
 }

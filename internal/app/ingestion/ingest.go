@@ -17,15 +17,11 @@ var ErrInvalidConfig = errors.New("invalid ingestion config")
 // DefaultMaxPending is the MaxPending of a Config that leaves it at zero.
 const DefaultMaxPending = 256
 
-// Embed turns a chunk into a vector: the slow stage of the ingestion, a call to the model.
-// An error fails that chunk only. Module 08 gives it a port, Embedder, and an adapter.
-type Embed func(ctx context.Context, c domain.Chunk) error
-
 // Config is what RunIngestion runs with.
 type Config struct {
-	Cutter  domain.Cutter
-	Workers int   // goroutines calling Embed; at least 1
-	Embed   Embed // required
+	Cutter   domain.Cutter
+	Workers  int      // goroutines calling the embedder; at least 1
+	Embedder Embedder // required: the slow stage, a call to the model
 	// MaxPending is the most chunks cut and not yet embedded or failed (RN03): when it is
 	// reached, the cutter waits for the embedder. Zero means DefaultMaxPending.
 	MaxPending int
@@ -51,9 +47,9 @@ type change func(*domain.Run) error
 // it changes. A read error or a canceled ctx fails the run and is returned; a chunk the
 // embedder fails is recorded and the run goes on.
 func RunIngestion(ctx context.Context, run *domain.Run, docs iter.Seq2[domain.Document, error], cfg Config) error {
-	if cfg.Workers < 1 || cfg.Embed == nil || cfg.MaxPending < 0 {
+	if cfg.Workers < 1 || cfg.Embedder == nil || cfg.MaxPending < 0 {
 		return fmt.Errorf("%w: %d workers, max pending %d, embedder set: %t",
-			ErrInvalidConfig, cfg.Workers, cfg.MaxPending, cfg.Embed != nil)
+			ErrInvalidConfig, cfg.Workers, cfg.MaxPending, cfg.Embedder != nil)
 	}
 	if cfg.MaxPending == 0 {
 		cfg.MaxPending = DefaultMaxPending
@@ -161,10 +157,12 @@ func RunIngestion(ctx context.Context, run *domain.Run, docs iter.Seq2[domain.Do
 	return nil
 }
 
-// embed calls cfg.Embed on c and sends the outcome to the run's owner. Only a canceled
-// context is an error of the stage; an embedder error fails the chunk.
+// embed asks cfg.Embedder for the vector of c and sends the outcome to the run's owner.
+// A canceled context and a broken contract are errors of the stage; an embedder error
+// fails the chunk. Module 12 keeps the vector in an index; until then it is checked and
+// dropped.
 func embed(ctx context.Context, cfg Config, c domain.Chunk, send func(change) error) error {
-	err := cfg.Embed(ctx, c)
+	vs, err := cfg.Embedder.Embed(ctx, []string{c.Text()})
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
@@ -173,6 +171,9 @@ func embed(ctx context.Context, cfg Config, c domain.Chunk, send func(change) er
 		cfg.Progress.ChunkFailed()
 		reason := err.Error()
 		return send(func(r *domain.Run) error { return r.FailChunk(id, reason) })
+	}
+	if len(vs) != 1 {
+		return fmt.Errorf("%w: %d vectors for 1 text", ErrBrokenEmbedder, len(vs))
 	}
 	cfg.Progress.ChunkEmbedded()
 	return send(func(r *domain.Run) error { return r.ConfirmChunk(id) })
