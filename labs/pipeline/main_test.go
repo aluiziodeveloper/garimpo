@@ -58,6 +58,18 @@ func TestCancelingTheContextStopsThePipeline(t *testing.T) {
 	}
 }
 
+// settled returns the number of goroutines once it falls to want, or after a second. A
+// goroutine that has closed its channel may still be returning, and counted, for a moment;
+// one that leaked never returns.
+func settled(want int) int {
+	n := runtime.NumGoroutine()
+	for deadline := time.Now().Add(time.Second); n > want && time.Now().Before(deadline); {
+		time.Sleep(time.Millisecond)
+		n = runtime.NumGoroutine()
+	}
+	return n
+}
+
 func TestNoGoroutineIsLeftBehind(t *testing.T) {
 	before := runtime.NumGoroutine()
 	failAt10 := func(_ context.Context, v int) (int, error) {
@@ -71,7 +83,7 @@ func TestNoGoroutineIsLeftBehind(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if after := runtime.NumGoroutine(); after != before {
+	if after := settled(before); after != before {
 		t.Fatalf("%d goroutines before, %d after ten failed runs", before, after)
 	}
 }
