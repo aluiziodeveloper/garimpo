@@ -1,0 +1,21 @@
+name: garimpo
+
+services:
+  dev:
+    build:
+      context: .
+      dockerfile: docker/dev.Dockerfile
+      args:
+        UID: ${UID:-1000}
+        GID: ${GID:-1000}
+    working_dir: /src
+    volumes:
+      - .:/src
+      - go-mod:/go/pkg/mod
+      - go-build:/home/dev/.cache/go-build
+    init: true
+    command: sleep infinity
+
+volumes:
+  go-mod:
+  go-build:

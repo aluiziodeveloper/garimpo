@@ -1,0 +1,12 @@
+# Binaries
+/bin/
+/garimpo
+*.exe
+*.test
+
+# Coverage and profiles
+*.out
+*.pprof
+
+# Local environment
+.env
