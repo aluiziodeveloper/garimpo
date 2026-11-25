@@ -73,3 +73,21 @@ runnable when `main` sends it a job, so the event happens on `main`, with `main`
 
 The stack says who woke the goroutine up, not where the goroutine waited. No transition in
 the 16-worker trace was `Running->Runnable`: no goroutine was preempted.
+
+## Module 04 challenge: the same wait without a trace
+
+`-latency` reads `/sched/latencies:seconds` from `runtime/metrics` before and after the pool
+("Distribution of the time goroutines have spent in the scheduler in a runnable state before
+actually running") and prints two percentiles of the new samples. It needs no trace file.
+On 2026-11-25, `lab` service (2 CPUs), Go 1.27.4:
+
+```
+workers=2 jobs=400 GOMAXPROCS=2 in 229ms, trace=/tmp/w.trace
+scheduler latency p50: under 16.384µs
+scheduler latency p99: under 1.31072ms
+workers=16 jobs=400 GOMAXPROCS=2 in 224ms, trace=/tmp/w.trace
+scheduler latency p50: under 1.31072ms
+scheduler latency p99: under 25.165824ms
+```
+
+The histogram has buckets, so a percentile is the upper bound of the bucket it falls in.

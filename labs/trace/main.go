@@ -24,8 +24,10 @@ func main() {
 	workers := flag.Int("workers", runtime.GOMAXPROCS(0), "goroutines in the pool")
 	jobs := flag.Int("jobs", 400, "CPU-bound jobs (SHA-256 chains)")
 	out := flag.String("o", "lab.trace", "where to write the trace")
+	latency := flag.Bool("latency", false, "also print the scheduler latency from runtime/metrics")
 	flag.Parse()
 
+	before := readSchedLatencies()
 	start := time.Now()
 	if err := write(*out, *workers, *jobs); err != nil {
 		fmt.Fprintln(os.Stderr, "trace:", err)
@@ -33,6 +35,17 @@ func main() {
 	}
 	fmt.Printf("workers=%d jobs=%d GOMAXPROCS=%d in %v, trace=%s\n",
 		*workers, *jobs, runtime.GOMAXPROCS(0), time.Since(start).Round(time.Millisecond), *out)
+	if *latency {
+		after := readSchedLatencies()
+		for _, q := range []float64{0.5, 0.99} {
+			v, err := percentile(before, after, q)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "trace:", err)
+				os.Exit(1)
+			}
+			fmt.Printf("scheduler latency p%g: under %v\n", q*100, time.Duration(v*float64(time.Second)))
+		}
+	}
 }
 
 // write creates the trace file and runs the pool, closing the file even when run fails.
