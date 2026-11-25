@@ -19,8 +19,11 @@ import (
 	"time"
 )
 
-// cpuStatPath is the cgroup v2 CPU accounting file of the current container.
-const cpuStatPath = "/sys/fs/cgroup/cpu.stat"
+// The cgroup v2 CPU files of the current container: accounting and quota.
+const (
+	cpuStatPath = "/sys/fs/cgroup/cpu.stat"
+	cpuMaxPath  = "/sys/fs/cgroup/cpu.max"
+)
 
 func main() {
 	pool := flag.String("pool", "gomaxprocs", "how to size the pool: gomaxprocs or numcpu")
@@ -46,6 +49,9 @@ func run(w io.Writer, pool string, jobs int) error {
 
 	if _, err := fmt.Fprintf(w, "NumCPU: %d  GOMAXPROCS: %d  pool: %s = %d workers\n",
 		runtime.NumCPU(), runtime.GOMAXPROCS(0), pool, n); err != nil {
+		return err
+	}
+	if err := printQuota(w, cpuMaxPath); err != nil {
 		return err
 	}
 
@@ -99,6 +105,48 @@ func hashChain(seed int) [32]byte {
 		sum = sha256.Sum256(sum[:])
 	}
 	return sum
+}
+
+// printQuota prints the container's CPU quota, the number Go 1.25+ uses for GOMAXPROCS.
+func printQuota(w io.Writer, path string) error {
+	cpus, limited, err := readQuota(path)
+	switch {
+	case err != nil:
+		_, err = fmt.Fprintf(w, "quota: not available (%v)\n", err)
+	case limited:
+		_, err = fmt.Fprintf(w, "quota: %g CPUs\n", cpus)
+	default:
+		_, err = fmt.Fprintln(w, "quota: none")
+	}
+	return err
+}
+
+// readQuota reads a cgroup v2 cpu.max file, "<quota> <period>" in microseconds, and returns
+// the quota in CPUs. A quota of "max" means no limit: limited is false.
+func readQuota(path string) (cpus float64, limited bool, err error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return 0, false, err
+	}
+	quota, period, ok := strings.Cut(strings.TrimSpace(string(data)), " ")
+	if !ok {
+		return 0, false, fmt.Errorf("%s: want \"<quota> <period>\", got %q", path, data)
+	}
+	if quota == "max" {
+		return 0, false, nil
+	}
+	q, err := strconv.ParseInt(quota, 10, 64)
+	if err != nil {
+		return 0, false, fmt.Errorf("%s: quota: %w", path, err)
+	}
+	p, err := strconv.ParseInt(period, 10, 64)
+	if err != nil {
+		return 0, false, fmt.Errorf("%s: period: %w", path, err)
+	}
+	if p <= 0 {
+		return 0, false, fmt.Errorf("%s: period %d is not positive", path, p)
+	}
+	return float64(q) / float64(p), true, nil
 }
 
 type throttled struct {

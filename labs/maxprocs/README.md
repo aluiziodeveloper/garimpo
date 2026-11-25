@@ -14,6 +14,7 @@ docker compose run --rm lab go run ./labs/maxprocs -jobs 4000
 docker compose run --rm lab go run ./labs/maxprocs -jobs 4000 -pool numcpu
 docker compose run --rm -e GODEBUG=containermaxprocs=0 lab go run ./labs/maxprocs -jobs 4000
 LAB_CPUS=4 docker compose run --rm lab go run ./labs/maxprocs -jobs 4000
+LAB_CPUS=1.5 docker compose run --rm lab go run ./labs/maxprocs -jobs 4000
 docker compose exec dev go run ./labs/maxprocs -jobs 4000   # dev has no CPU limit
 docker compose exec dev go test -race ./labs/maxprocs
 ```
@@ -57,6 +58,33 @@ waiting on, which is why it is larger than the run itself.
 In three earlier runs the same day: 2.265 to 2.315 s with no throttling against 3.474 to
 4.12 s with 35 to 42 throttled periods. A copy of the lab with `go 1.24` in its `go.mod`, built
 by the same Go 1.27.4, printed `GOMAXPROCS: 20` and 39 throttled periods.
+
+## The quota (module 01 challenge)
+
+The lab also prints the quota it reads from `/sys/fs/cgroup/cpu.max` (`readQuota` in
+`main.go`): `"<quota> <period>"` in microseconds, or `max` for no limit. Real runs on
+2026-11-25, same machine:
+
+```
+NumCPU: 20  GOMAXPROCS: 2  pool: gomaxprocs = 2 workers
+quota: 2 CPUs
+4000 jobs in 2.535s
+throttled: 0 periods, 0s summed over CPUs
+```
+
+With `LAB_CPUS=1.5` the quota is not a whole number, and `GOMAXPROCS` is still 2: the runtime
+"rounds up" a fractional limit and "will never set GOMAXPROCS less than 2 unless the logical
+CPU count or CPU affinity mask count are below 2" (package `runtime`, *Default*). Two threads
+on 1.5 CPUs get throttled:
+
+```
+NumCPU: 20  GOMAXPROCS: 2  pool: gomaxprocs = 2 workers
+quota: 1.5 CPUs
+4000 jobs in 3.234s
+throttled: 32 periods, 1.481s summed over CPUs
+```
+
+In `dev`, with no limit, the line reads `quota: none`.
 
 ## The rule in code
 
