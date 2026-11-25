@@ -84,11 +84,22 @@ Check a title before opening the pull request with `scripts/check-pr-title.sh "<
 Dependabot (`.github/dependabot.yml`) opens weekly updates for the Go modules and the
 GitHub Actions, with titles that pass the same check.
 
+## Architecture
+
+Hexagonal, in layers. `cmd/garimpo` wires adapters into use cases; use cases depend on the
+domain and on ports; the domain depends on nothing. The lint enforces the boundaries
+(`depguard` and `forbidigo` in `.golangci.yml`): the domain cannot import `sync`, `net`, `os`
+or an outer layer, nor call `time.Now`; use cases cannot import adapters or `net/http`;
+labs cannot import `internal/`.
+
 ## Layout
 
 | Path | Contents |
 |---|---|
 | `cmd/garimpo` | The binary: argument handling and wiring |
+| `internal/domain/` | The domain: pure and sequential, no goroutines, no I/O, no global clock. `shared` is the shared kernel |
+| `internal/app/` | Use cases: orchestrate the domain and declare the ports they consume |
+| `internal/adapters/` | Adapters: implement the ports (Ollama, journal, indexes, HTTP) |
 | `docs/adr/` | Architecture decision records, with an index |
 | `docs/incidents/` | Postmortems, one per incident (`INC-01.md`, ...) |
 | `docs/glossary.md` | Domain and technical glossary |
@@ -96,7 +107,7 @@ GitHub Actions, with titles that pass the same check.
 | `docker/dev.Dockerfile` | The development container (Go 1.27.4) |
 | `compose.yaml` | Local services: `dev`, `ollama` and `lab` (profile `labs`, CPU quota `LAB_CPUS`) |
 | `tools/go.mod` | Pinned development tools (`go tool -modfile=tools/go.mod …`) |
-| `.golangci.yml` | Linters and formatter |
+| `.golangci.yml` | Linters, formatter and the layer boundaries |
 | `.github/workflows/ci.yml` | CI: format, lint, race tests, build |
 | `.github/workflows/pr-title.yml` | CI: the pull request title follows Conventional Commits |
 | `.github/ruleset-main.json` | Protection rules for `main` |

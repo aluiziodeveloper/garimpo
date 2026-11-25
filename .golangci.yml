@@ -6,13 +6,49 @@ run:
 linters:
   default: standard # errcheck, govet, ineffassign, staticcheck, unused
   enable:
+    - depguard     # layer boundaries: what each layer may import (ADR 0002)
     - errorlint    # errors compared or type-asserted without errors.Is/As
+    - forbidigo    # identifiers a layer must not use (time.Now in the domain)
     - gocritic     # common bugs and style problems
     - misspell
     - nolintlint   # every //nolint needs a linter name and a reason
     - revive
     - unparam
   settings:
+    depguard:
+      rules:
+        # The domain is pure and sequential: no goroutine machinery, no I/O, no outer layer.
+        domain:
+          files: ["**/internal/domain/**"]
+          deny:
+            - pkg: sync
+              desc: "the domain is sequential; concurrency lives in app and adapters"
+            - pkg: net
+              desc: "the domain does no I/O; adapters talk to the network"
+            - pkg: os
+              desc: "the domain does no I/O; adapters read files"
+            - pkg: github.com/aluiziodeveloper/garimpo/internal/app
+              desc: "the domain depends on nothing; app depends on the domain"
+            - pkg: github.com/aluiziodeveloper/garimpo/internal/adapters
+              desc: "the domain depends on nothing; adapters depend on the domain"
+        # Use cases declare the ports they need; they never reach for an adapter.
+        app:
+          files: ["**/internal/app/**"]
+          deny:
+            - pkg: net/http
+              desc: "HTTP lives in an adapter"
+            - pkg: github.com/aluiziodeveloper/garimpo/internal/adapters
+              desc: "app talks to adapters through ports; cmd/garimpo wires them"
+        # Labs stand alone, outside the architecture.
+        labs:
+          files: ["**/labs/**"]
+          deny:
+            - pkg: github.com/aluiziodeveloper/garimpo/internal
+              desc: "labs do not import the application"
+    forbidigo:
+      forbid:
+        - pattern: ^time\.Now$
+          msg: "the domain gets the time from a Clock, never from the global clock"
     govet:
       enable-all: true
       disable:
@@ -20,6 +56,11 @@ linters:
     nolintlint:
       require-explanation: true
       require-specific: true
+  exclusions:
+    rules:
+      # The time.Now rule is for the domain only.
+      - path-except: internal/domain/
+        linters: [forbidigo]
 
 formatters:
   enable:
