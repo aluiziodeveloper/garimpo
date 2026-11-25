@@ -32,6 +32,15 @@ services:
     cpus: ${LAB_CPUS:-2}
     command: go version
 
+  # Benchmarks pin two CPUs (cpuset) instead of a CPU quota, so the host does not move them
+  # around or throttle them in the middle of a run:
+  #   docker compose run --rm bench go test -run '^$' -bench . -count 10 ./labs/goroutine-cost
+  bench:
+    <<: *dev
+    profiles: [labs]
+    cpuset: ${BENCH_CPUSET:-2,4}
+    command: go version
+
   ollama:
     image: ollama/ollama:0.40.16
     cpus: *ollama-cpus
