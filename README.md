@@ -39,6 +39,27 @@ docker compose exec dev go build ./...
 Development tools are pinned in `tools/go.mod`, apart from the project's `go.mod`, so their
 dependencies never mix with Garimpo's.
 
+## Workflow
+
+`main` is protected by the ruleset in `.github/ruleset-main.json`: no direct pushes, changes
+only through pull requests, squash merge only, and the checks `Lint and format`,
+`Tests (race)`, `Build` and `PR title` must be green. The pull request title follows
+[Conventional Commits](https://www.conventionalcommits.org/) and becomes the commit on `main`.
+
+Every change goes from a branch to `main` with one script, run on the host (it needs `git`
+and `gh`):
+
+```bash
+git switch -c feat/some-change
+# ... edit, test ...
+scripts/pr.sh "feat: add some change"            # commit, push, PR, checks, squash merge
+scripts/pr.sh "feat: add some change" aula-02-01 # same, and tags the merge commit
+```
+
+Check a title before opening the pull request with `scripts/check-pr-title.sh "<title>"`.
+Dependabot (`.github/dependabot.yml`) opens weekly updates for the Go modules and the
+GitHub Actions, with titles that pass the same check.
+
 ## Layout
 
 | Path | Contents |
@@ -49,6 +70,10 @@ dependencies never mix with Garimpo's.
 | `tools/go.mod` | Pinned development tools (`go tool -modfile=tools/go.mod …`) |
 | `.golangci.yml` | Linters and formatter |
 | `.github/workflows/ci.yml` | CI: format, lint, race tests, build |
+| `.github/workflows/pr-title.yml` | CI: the pull request title follows Conventional Commits |
+| `.github/ruleset-main.json` | Protection rules for `main` |
+| `.github/dependabot.yml` | Weekly dependency and action updates |
+| `scripts/` | `pr.sh` (branch to `main`) and `check-pr-title.sh` |
 
 ## License
 

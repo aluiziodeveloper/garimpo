@@ -1,0 +1,21 @@
+name: PR title
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+permissions:
+  contents: read
+
+jobs:
+  title:
+    name: PR title
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check the title against Conventional Commits
+        # The title goes through an environment variable, never straight into the script:
+        # a title is user input and could carry shell code.
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        run: scripts/check-pr-title.sh "$TITLE"
