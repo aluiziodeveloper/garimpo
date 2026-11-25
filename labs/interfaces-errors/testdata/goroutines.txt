@@ -1,0 +1,2 @@
+title: Goroutines
+A goroutine is a function running concurrently with other goroutines.
