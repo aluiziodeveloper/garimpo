@@ -59,8 +59,15 @@ func TestScanCountsTheLibrarySources(t *testing.T) {
 	if err := run([]string{"scan", "-corpus", dir}, &out); err != nil {
 		t.Fatal(err)
 	}
-	if got, want := out.String(), "documents=2 bytes=43\n"; got != want {
+	if got, want := out.String(), "documents=2 bytes=43 chunks=2 average=21 largest=29\n"; got != want {
 		t.Errorf("scan output = %q, want %q", got, want)
+	}
+}
+
+func TestScanRejectsAZeroWindow(t *testing.T) {
+	err := run([]string{"scan", "-window", "0"}, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "invalid window") {
+		t.Errorf("scan -window 0: error = %v", err)
 	}
 }
 
