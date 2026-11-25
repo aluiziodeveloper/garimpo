@@ -13,6 +13,7 @@ default. It belongs to the `labs` profile, so it only runs when you ask for it.
 docker compose run --rm lab go run ./labs/maxprocs -jobs 4000
 docker compose run --rm lab go run ./labs/maxprocs -jobs 4000 -pool numcpu
 docker compose run --rm -e GODEBUG=containermaxprocs=0 lab go run ./labs/maxprocs -jobs 4000
+docker compose run --rm -e GOMAXPROCS=8 lab go run ./labs/maxprocs -jobs 4000
 LAB_CPUS=4 docker compose run --rm lab go run ./labs/maxprocs -jobs 4000
 docker compose exec dev go run ./labs/maxprocs -jobs 4000   # dev has no CPU limit
 docker compose exec dev go test -race ./labs/maxprocs
@@ -41,14 +42,23 @@ throttled: 4 periods, 9ms summed over CPUs
 ```
 
 The incident (INC-01) is `GOMAXPROCS` itself seeing 20 CPUs. That is what happens with
-`GODEBUG=containermaxprocs=0`, with a `go.mod` that says `go 1.24` or older, and with any Go
-before 1.25. Twenty threads burn the 2-CPU quota early in each 100 ms period and the kernel
+`GODEBUG=containermaxprocs=0`, with a `go.mod` that says `go 1.24` or older, with any Go
+before 1.25, and with `GOMAXPROCS` set by hand (the environment variable or a call to
+`runtime.GOMAXPROCS`), which takes precedence over the quota. Twenty threads burn the 2-CPU quota early in each 100 ms period and the kernel
 stops the whole container until the next one:
 
 ```
 NumCPU: 20  GOMAXPROCS: 20  pool: gomaxprocs = 20 workers
 4000 jobs in 3.54s
 throttled: 36 periods, 57.764s summed over CPUs
+```
+
+A `GOMAXPROCS` set by hand wins over the quota too (`-e GOMAXPROCS=8`, same day):
+
+```
+NumCPU: 20  GOMAXPROCS: 8  pool: gomaxprocs = 8 workers
+4000 jobs in 2.833s
+throttled: 29 periods, 16.077s summed over CPUs
 ```
 
 The throttled time is the kernel's `throttled_usec`, added up over the CPUs the threads were
@@ -69,5 +79,6 @@ pool follows `NumCPU`:
     main_test.go:24: workers() = 20, want 3 (GOMAXPROCS, not NumCPU = 20)
 ```
 
-Ollama is not a Go program and does not do this: it sizes its threads from the host CPUs, so
-Garimpo sends `num_thread` on every request (see the main README).
+Ollama does not do this. Its server is written in Go, but inference runs in a C/C++ library
+that sizes its threads from the host CPUs and never looks at `GOMAXPROCS`, so Garimpo sends
+`num_thread` on every request (see the main README).
