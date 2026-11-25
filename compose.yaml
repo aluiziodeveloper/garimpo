@@ -5,7 +5,7 @@ name: garimpo
 x-ollama-cpus: &ollama-cpus ${OLLAMA_CPUS:-4}
 
 services:
-  dev:
+  dev: &dev
     build:
       context: .
       dockerfile: docker/dev.Dockerfile
@@ -22,6 +22,15 @@ services:
       - go-build:/home/dev/.cache/go-build
     init: true
     command: sleep infinity
+
+  # Labs that need a CPU limit (compose run has no --cpus flag):
+  #   docker compose run --rm lab go run ./labs/maxprocs
+  #   LAB_CPUS=4 docker compose run --rm lab go run ./labs/maxprocs
+  lab:
+    <<: *dev
+    profiles: [labs]
+    cpus: ${LAB_CPUS:-2}
+    command: go version
 
   ollama:
     image: ollama/ollama:0.40.16
