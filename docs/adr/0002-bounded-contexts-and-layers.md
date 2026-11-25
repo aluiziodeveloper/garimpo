@@ -84,8 +84,18 @@ All taken on 2026-11-25 with Go 1.27.4.
 
 ## Changes
 
+- **2026-11-25, module 06: `internal/seq`, a support package outside the layers.** It holds
+  the iterator helpers the layers share (`Results[T]`, with the generic method `FlatMap`).
+  It has no business rules, imports only the standard library and declares no port: a
+  generic method satisfies no interface, so ports take an `iter.Seq2`. Any layer may
+  import it; today the use case `ingestion.SurveyCorpus` does. The labs still may not,
+  since their rule denies all of `internal`. Keeping it free of Garimpo's packages is a
+  review rule, not a lint one.
+- **2026-11-25, module 07: the aggregate is `ingestion.Run`.** The package already names the
+  context, and `ingestion.IngestionRun` would say it twice. The context's words do not
+  change: it is still the ingestion run.
 - **2026-11-25, module 07: the byte offset joined the `ChunkID`.** The first ingestion of
-  the whole corpus failed with `chunk already handled`: the `IngestionRun` refused a chunk
+  the whole corpus failed with `chunk already handled`: the `ingestion.Run` refused a chunk
   it had already confirmed. A line longer than the window is split into pieces (lesson
   06-07), and line 5 of `time/tzdata/zzipdata.go` has two pairs of equal 700-byte pieces:
   same path, same line, same text, same ID. The corpus had 41,980 chunks and 41,978 IDs.
