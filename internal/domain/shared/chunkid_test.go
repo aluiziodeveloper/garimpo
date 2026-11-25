@@ -88,3 +88,40 @@ func TestZeroChunkID(t *testing.T) {
 		t.Errorf("String() = %q, want an empty string", got)
 	}
 }
+
+func TestParseChunkIDRoundTrip(t *testing.T) {
+	id, _ := NewChunkID("sync/mutex.go", 1, 30, "package sync")
+	got, err := ParseChunkID(id.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != id {
+		t.Errorf("ParseChunkID(%q) = %s, want %s", id.String(), got, id)
+	}
+}
+
+func TestParseChunkIDRejectsInvalidInput(t *testing.T) {
+	id, _ := NewChunkID("sync/mutex.go", 1, 30, "package sync")
+	s := id.String()
+	tests := []struct {
+		name, in string
+	}{
+		{"empty", ""},
+		{"too short", s[:63]},
+		{"too long", s + "0"},
+		{"not hexadecimal", "z" + s[1:]},
+		{"upper case", "A" + s[1:]},
+		{"all zeros", "0000000000000000000000000000000000000000000000000000000000000000"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ParseChunkID(tt.in)
+			if !errors.Is(err, ErrInvalidChunkID) {
+				t.Errorf("err = %v, want one that wraps ErrInvalidChunkID", err)
+			}
+			if !got.IsZero() {
+				t.Errorf("got %s, want the zero ChunkID", got)
+			}
+		})
+	}
+}
