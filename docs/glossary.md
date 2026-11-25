@@ -21,6 +21,7 @@ the lessons use the Portuguese word in parentheses.
 | **score** (nota) | How close a chunk is to a query: the dot product of their vectors, between -1 and 1 | 03-07 |
 | **citation** (citação) | Lines of a chunk that exists in the corpus, printed as `path:line` or `path:start-end` (RN01) | 03-08 |
 | **ingestion run** (rodada de coleta) | One pass of reading, cutting and embedding the corpus, which can be paused and resumed | 03-02 |
+| **pending chunk** (trecho pendente) | A chunk cut and not yet embedded or failed. RN03 bounds how many exist at once (`Config.MaxPending`, 256 by default) | 07-09 |
 | **progress** (progresso) | What an ingestion run has done so far: documents read, chunks cut, embedded and failed, and the pending ones. A snapshot of it is one moment of the run (`ingestion.Progress`) | 05-07 |
 | **index snapshot** (fotografia do índice) | An immutable, complete version of the index; a query only ever reads one (RN05) | 03-02 |
 | **hit** (acerto) | A chunk returned by a search, with its score | 03-02 |
@@ -41,6 +42,8 @@ the lessons use the Portuguese word in parentheses.
 | **invariant** | A rule that holds for every value of a type, such as norm 1 for `Vector` | 03-07 |
 | **zero value** | What a variable holds before any assignment. In the value objects it means "none" and is safe to use (`IsZero`) | 03-06 |
 | **property test** | A test that checks a rule on many generated inputs instead of a few examples (`testing/quick`) | 03-09 |
+| **aggregate** | A cluster of objects changed only through one root, which checks the invariants and the state machine: `ingestion.Run`, the `IngestionRun`. One goroutine owns it | 07-01 |
+| **domain event** | Something that happened to an aggregate, in the past tense (`ChunkEmbedded`), recorded by each accepted command and handed out with `TakeEvents`; module 10 writes them to the journal | 07-03 |
 | **fuzzing** | A property test whose inputs Go generates and mutates, guided by coverage (`go test -fuzz`). A failing input is saved under `testdata/fuzz` and runs as a test from then on | 06-08 |
 
 ## Go and runtime
@@ -83,6 +86,10 @@ the lessons use the Portuguese word in parentheses.
 | **pull iterator** (`iter.Pull`) | A push iterator turned into `next` and `stop` calls, so two sequences can be walked side by side. Each `next` switches goroutines: about 69 ns per value against 1 ns for a push iterator (lesson 06-04). `stop` must be called | 06-03 |
 | **single-use iterator** | An iterator over a stream that cannot be rewound, such as lines read from a connection: calling it again does not start over. Its doc comment says so | 06-03 |
 | **generic method** | Since Go 1.27, a method with type parameters of its own, such as `Map[W any]` on `Seq[V]`. It must be instantiated before use as a value, and it satisfies no interface | 06-05 |
+| **pipeline** | Stages connected by channels, each one a goroutine or a group of them, so that one stage works while the next handles what came before | 07-04 |
+| **fan-out, fan-in** | Fan-out: several goroutines take work from one channel. Fan-in: their results go into one channel. A waiting stage scales past the CPUs; a busy one stops at them (lesson 07-05) | 07-04 |
+| **`errgroup`** | `golang.org/x/sync/errgroup`: goroutines whose first error cancels the group's context and is the one `Wait` returns. `Wait` waits for all of them, so a stage that never returns hangs the group | 07-05 |
+| **backpressure** | A slow stage making the fast one before it wait, through a bounded channel, instead of letting the work pile up in memory (INC-07) | 07-08 |
 | **peak live heap** | The largest heap the garbage collector found alive during a run, sampled from `/gc/heap/live:bytes` (`runtime/metrics`) | 06-10 |
 
 ## Infrastructure
