@@ -3,6 +3,7 @@ package ingestion
 import (
 	"context"
 	"errors"
+	"iter"
 	"runtime"
 	"sync"
 	"testing"
@@ -195,5 +196,64 @@ func TestRunIngestionNeedsAWorkerAndAnEmbedder(t *testing.T) {
 		if run.State() != domain.Pending {
 			t.Errorf("a run with a broken config is %s, want pending", run.State())
 		}
+	}
+}
+
+// oneLiners returns n documents of one line each: n chunks with any window.
+func oneLiners(t *testing.T, n int) iter.Seq2[domain.Document, error] {
+	t.Helper()
+	texts := make([]string, n)
+	for i := range texts {
+		texts[i] = "aaaa\n"
+	}
+	return documents(t, nil, texts...)
+}
+
+// TestRunIngestionNeverHoldsMoreThanMaxPending is RN03: the chunks cut and not yet
+// embedded or failed never pass the limit, however slow the embedder is.
+func TestRunIngestionNeverHoldsMoreThanMaxPending(t *testing.T) {
+	var cfg Config
+	var most int64
+	f := fakeEmbedder{fail: func(domain.Chunk) error {
+		most = max(most, cfg.Progress.Snapshot().Pending())
+		time.Sleep(time.Millisecond) // a slow model: the cutter gets ahead
+		return nil
+	}}
+	var events []domain.Event
+	run, cfg := setup(t, &f, &events)
+	cfg.Workers, cfg.MaxPending = 2, 8
+
+	if err := RunIngestion(t.Context(), run, oneLiners(t, 100), cfg); err != nil {
+		t.Fatal(err)
+	}
+	if most > 8 {
+		t.Fatalf("%d chunks pending at once, want at most 8 (RN03)", most)
+	}
+	if got := cfg.Progress.Snapshot(); got.Embedded != 100 {
+		t.Fatalf("progress = %v, want all 100 embedded", got)
+	}
+}
+
+func TestAMaxPendingOfOneStillCompletes(t *testing.T) {
+	var f fakeEmbedder
+	var events []domain.Event
+	run, cfg := setup(t, &f, &events)
+	cfg.MaxPending = 1
+
+	if err := RunIngestion(t.Context(), run, oneLiners(t, 50), cfg); err != nil {
+		t.Fatal(err)
+	}
+	if run.State() != domain.Completed || len(f.seen) != 50 {
+		t.Fatalf("run %s with %d chunks embedded, want completed with 50", run.State(), len(f.seen))
+	}
+}
+
+func TestANegativeMaxPendingIsRejected(t *testing.T) {
+	var f fakeEmbedder
+	var events []domain.Event
+	run, cfg := setup(t, &f, &events)
+	cfg.MaxPending = -1
+	if err := RunIngestion(t.Context(), run, oneLiners(t, 1), cfg); !errors.Is(err, ErrInvalidConfig) {
+		t.Fatalf("err = %v, want ErrInvalidConfig", err)
 	}
 }

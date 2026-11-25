@@ -14,17 +14,23 @@ import (
 // ErrInvalidConfig is wrapped when RunIngestion gets a Config it cannot run with.
 var ErrInvalidConfig = errors.New("invalid ingestion config")
 
+// DefaultMaxPending is the MaxPending of a Config that leaves it at zero.
+const DefaultMaxPending = 256
+
 // Embed turns a chunk into a vector: the slow stage of the ingestion, a call to the model.
 // An error fails that chunk only. Module 08 gives it a port, Embedder, and an adapter.
 type Embed func(ctx context.Context, c domain.Chunk) error
 
 // Config is what RunIngestion runs with.
 type Config struct {
-	Cutter   domain.Cutter
-	Workers  int                  // goroutines calling Embed; at least 1
-	Embed    Embed                // required
-	Progress *Progress            // optional: counted as the run goes
-	Record   func([]domain.Event) // optional: gets the run's events as they happen
+	Cutter  domain.Cutter
+	Workers int   // goroutines calling Embed; at least 1
+	Embed   Embed // required
+	// MaxPending is the most chunks cut and not yet embedded or failed (RN03): when it is
+	// reached, the cutter waits for the embedder. Zero means DefaultMaxPending.
+	MaxPending int
+	Progress   *Progress            // optional: counted as the run goes
+	Record     func([]domain.Event) // optional: gets the run's events as they happen
 }
 
 // change is something a stage asks the run's owner to apply to the run.
@@ -33,16 +39,24 @@ type change func(*domain.Run) error
 // RunIngestion runs the ingestion: it reads docs, cuts each document, embeds each chunk on
 // cfg.Workers goroutines and records it all in run, which must be pending.
 //
-//	docs --> cut --> queue --> embed (x Workers)
-//	   \        \                 /
-//	    `--------`-- changes ----'--> the run's owner (the caller's goroutine)
+//	docs --> cut --(at most MaxPending in flight)--> embed (x Workers)
+//	   \        \                                      /
+//	    `--------`---------------- changes ------------'--> the run's owner (the caller)
+//
+// A chunk takes a slot of pending before it is counted as cut, and gives it back once it
+// is counted as embedded or failed: a slow embedder stops the cutter, and the corpus is
+// never held in memory (RN03, INC-07).
 //
 // The domain is sequential, so only the caller's goroutine touches run: the stages send
 // it changes. A read error or a canceled ctx fails the run and is returned; a chunk the
 // embedder fails is recorded and the run goes on.
 func RunIngestion(ctx context.Context, run *domain.Run, docs iter.Seq2[domain.Document, error], cfg Config) error {
-	if cfg.Workers < 1 || cfg.Embed == nil {
-		return fmt.Errorf("%w: %d workers, embedder set: %t", ErrInvalidConfig, cfg.Workers, cfg.Embed != nil)
+	if cfg.Workers < 1 || cfg.Embed == nil || cfg.MaxPending < 0 {
+		return fmt.Errorf("%w: %d workers, max pending %d, embedder set: %t",
+			ErrInvalidConfig, cfg.Workers, cfg.MaxPending, cfg.Embed != nil)
+	}
+	if cfg.MaxPending == 0 {
+		cfg.MaxPending = DefaultMaxPending
 	}
 	if cfg.Progress == nil {
 		cfg.Progress = new(Progress)
@@ -68,7 +82,10 @@ func RunIngestion(ctx context.Context, run *domain.Run, docs iter.Seq2[domain.Do
 		}
 	}
 
-	cut := make(chan domain.Chunk)
+	// The buffer lets the cutter get up to MaxPending chunks ahead of the embedder; the
+	// slots make the count exact, chunks in the workers' hands included.
+	pending := make(chan struct{}, cfg.MaxPending) // one slot per chunk in flight
+	cut := make(chan domain.Chunk, cfg.MaxPending)
 	g.Go(func() error { // stage 1: read and cut
 		defer close(cut)
 		for d, err := range docs {
@@ -80,6 +97,11 @@ func RunIngestion(ctx context.Context, run *domain.Run, docs iter.Seq2[domain.Do
 				return err
 			}
 			for c := range cfg.Cutter.Cut(d) {
+				select {
+				case pending <- struct{}{}: // waits while MaxPending chunks are in flight
+				case <-ctx.Done():
+					return ctx.Err()
+				}
 				cfg.Progress.ChunksCut(1)
 				select {
 				case cut <- c:
@@ -91,13 +113,12 @@ func RunIngestion(ctx context.Context, run *domain.Run, docs iter.Seq2[domain.Do
 		return nil
 	})
 
-	queued := make(chan domain.Chunk)
-	g.Go(func() error { return queue(ctx, cut, queued) }) // stage 2: the cutter never waits
-
-	for range cfg.Workers { // stage 3: embed
+	for range cfg.Workers { // stage 2: embed
 		g.Go(func() error {
-			for c := range queued {
-				if err := embed(ctx, cfg, c, send); err != nil {
+			for c := range cut {
+				err := embed(ctx, cfg, c, send)
+				<-pending // counted as embedded or failed: the slot is free
+				if err != nil {
 					return err
 				}
 			}
@@ -155,31 +176,4 @@ func embed(ctx context.Context, cfg Config, c domain.Chunk, send func(change) er
 	}
 	cfg.Progress.ChunkEmbedded()
 	return send(func(r *domain.Run) error { return r.ConfirmChunk(id) })
-}
-
-// queue passes every chunk from in to out, in order, holding the ones out is not ready
-// for, so that whoever sends on in never waits for whoever receives on out.
-func queue(ctx context.Context, in <-chan domain.Chunk, out chan<- domain.Chunk) error {
-	defer close(out)
-	var held []domain.Chunk
-	for in != nil || len(held) > 0 {
-		var send chan<- domain.Chunk // nil while nothing is held: that case never fires
-		var next domain.Chunk
-		if len(held) > 0 {
-			send, next = out, held[0]
-		}
-		select {
-		case c, ok := <-in:
-			if !ok {
-				in = nil
-				continue
-			}
-			held = append(held, c)
-		case send <- next:
-			held = held[1:]
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-	}
-	return nil
 }
