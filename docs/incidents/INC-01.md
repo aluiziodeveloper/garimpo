@@ -32,12 +32,14 @@ throttled: 36 periods, 57.764s summed over CPUs
 `GOMAXPROCS` is how many threads run Go code at once. Before Go 1.25 it defaulted to the
 number of CPUs of the machine, and a CPU quota set by the container (a cgroup limit) did not
 change it. Since Go 1.25 the runtime reads the quota and lowers `GOMAXPROCS` to match, but
-the old behaviour comes back in three cases:
+the old behaviour comes back in four cases:
 
 1. a binary built with Go older than 1.25;
 2. a main module whose `go.mod` says `go 1.24` or older (a copy of the lab with `go 1.24`,
    built by Go 1.27.4, printed `GOMAXPROCS: 20` and 39 throttled periods);
-3. `GODEBUG=containermaxprocs=0`.
+3. `GODEBUG=containermaxprocs=0`;
+4. `GOMAXPROCS` set by hand, with the environment variable or a call to `runtime.GOMAXPROCS`:
+   the Go 1.25 release notes say this disables the container-aware default.
 
 With 20 threads and a quota of 2 CPUs, the container uses up its 200 ms of CPU early in each
 100 ms period and waits, stopped, until the next one.
@@ -66,6 +68,7 @@ It runs in CI with the race detector, like every test.
 
 ## Same symptom, different program
 
-Ollama is not a Go program and does not read the quota: with `cpus: 4` it started
+Ollama's server is written in Go, but its inference runs in a C/C++ library that picks its
+threads from the host CPUs and does not read the quota: with `cpus: 4` it started
 `n_threads = 10` and took 1.74 to 1.90 s per generation, against 0.62 to 0.65 s with
 `num_thread=4`. Garimpo sends `num_thread` on every request (ADR 0001, decision 5).

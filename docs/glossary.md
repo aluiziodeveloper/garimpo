@@ -20,7 +20,7 @@ no domain code.
 | **race detector** | The `-race` instrumentation that reports two goroutines touching the same memory without synchronization while one writes. It proves a race happened, not that the code is correct | 01-04 |
 | **`GOMAXPROCS`** | How many OS threads run Go code at the same time. Read it with `runtime.GOMAXPROCS(0)` | 01-07 |
 | **`runtime.NumCPU`** | The CPUs the process may be scheduled on. A CPU quota does not change it | 01-07 |
-| **container-aware `GOMAXPROCS`** | Since Go 1.25, the default `GOMAXPROCS` follows the container's CPU limit. Off with `GODEBUG=containermaxprocs=0` or a `go` directive older than 1.25 | 01-07 |
+| **container-aware `GOMAXPROCS`** | Since Go 1.25, the default `GOMAXPROCS` follows the container's CPU limit. Off with a Go older than 1.25, a `go` directive older than 1.25, `GODEBUG=containermaxprocs=0` or a `GOMAXPROCS` set by hand | 01-07 |
 | **`GODEBUG`** | An environment variable that switches runtime behaviours on or off, one `name=value` per setting | 01-07 |
 | **CPU quota** | A cgroup limit on CPU time per period (`cpus: 2` in Compose: 200 ms every 100 ms) | 01-06 |
 | **throttling** | The kernel stopping a cgroup that used its CPU quota until the next period. Counted in `nr_throttled` of `/sys/fs/cgroup/cpu.stat` | 01-07 |
