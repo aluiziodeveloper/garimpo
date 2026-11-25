@@ -2,39 +2,54 @@ package ingestion
 
 import (
 	"fmt"
-	"sync/atomic"
+	"sync"
 )
 
 // Progress counts what an ingestion run has done so far. The run's workers update it from
 // many goroutines, and anyone may read a Snapshot while the run goes on, to log it or to
 // show it. The zero value is ready to use; a Progress must not be copied after first use.
+//
+// One mutex guards the four counts. Four atomics would make each count exact and the
+// snapshot a mix of moments: a reader between two loads sees more chunks done than cut
+// (lesson 05-08).
 type Progress struct {
-	documents atomic.Int64
-	chunks    atomic.Int64
-	embedded  atomic.Int64
-	failed    atomic.Int64
+	mu sync.Mutex
+	c  Counts
 }
 
 // DocumentRead counts one document of the corpus read from disk.
-func (p *Progress) DocumentRead() { p.documents.Add(1) }
+func (p *Progress) DocumentRead() {
+	p.mu.Lock()
+	p.c.Documents++
+	p.mu.Unlock()
+}
 
 // ChunksCut counts n chunks cut from a document.
-func (p *Progress) ChunksCut(n int) { p.chunks.Add(int64(n)) }
+func (p *Progress) ChunksCut(n int) {
+	p.mu.Lock()
+	p.c.Chunks += int64(n)
+	p.mu.Unlock()
+}
 
 // ChunkEmbedded counts one chunk turned into a vector.
-func (p *Progress) ChunkEmbedded() { p.embedded.Add(1) }
+func (p *Progress) ChunkEmbedded() {
+	p.mu.Lock()
+	p.c.Embedded++
+	p.mu.Unlock()
+}
 
 // ChunkFailed counts one chunk the embedder gave up on.
-func (p *Progress) ChunkFailed() { p.failed.Add(1) }
+func (p *Progress) ChunkFailed() {
+	p.mu.Lock()
+	p.c.Failed++
+	p.mu.Unlock()
+}
 
-// Snapshot returns the counts so far.
+// Snapshot returns the counts at one moment of the run: a copy taken under the lock.
 func (p *Progress) Snapshot() Counts {
-	return Counts{
-		Documents: p.documents.Load(),
-		Chunks:    p.chunks.Load(),
-		Embedded:  p.embedded.Load(),
-		Failed:    p.failed.Load(),
-	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.c
 }
 
 // Counts is the progress of a run, as read by Snapshot.

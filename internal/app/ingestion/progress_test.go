@@ -25,6 +25,37 @@ func TestProgressCountsFromManyGoroutines(t *testing.T) {
 	}
 }
 
+// A snapshot must be a moment the run went through. Each worker cuts one chunk and embeds
+// it, so at any moment 0 to workers chunks are pending.
+func TestSnapshotIsAMomentOfTheRun(t *testing.T) {
+	const workers = 4
+	var p Progress
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+	for range workers {
+		wg.Go(func() {
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				p.ChunksCut(1)
+				p.ChunkEmbedded()
+			}
+		})
+	}
+	defer func() {
+		close(stop)
+		wg.Wait()
+	}()
+	for i := range 100_000 {
+		if c := p.Snapshot(); c.Pending() < 0 || c.Pending() > workers {
+			t.Fatalf("snapshot %d: %v, want pending from 0 to %d", i, c, workers)
+		}
+	}
+}
+
 func TestZeroProgressIsReady(t *testing.T) {
 	var p Progress
 	if got := p.Snapshot(); got != (Counts{}) || got.Pending() != 0 {
