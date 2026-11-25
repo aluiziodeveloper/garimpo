@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"iter"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/aluiziodeveloper/garimpo/internal/domain/shared"
 )
@@ -22,10 +23,10 @@ type Cutter struct {
 }
 
 // NewCutter returns a Cutter whose chunks hold at most window bytes. The window must be
-// at least 1.
+// at least utf8.UTFMax bytes, so that any character fits in a chunk.
 func NewCutter(window int) (Cutter, error) {
-	if window < 1 {
-		return Cutter{}, fmt.Errorf("%w: %d bytes, want at least 1", ErrInvalidWindow, window)
+	if window < utf8.UTFMax {
+		return Cutter{}, fmt.Errorf("%w: %d bytes, want at least %d", ErrInvalidWindow, window, utf8.UTFMax)
 	}
 	return Cutter{window: window}, nil
 }
@@ -79,10 +80,14 @@ func (c Cutter) Cut(d Document) iter.Seq[Chunk] {
 			}
 			to += len(l)
 			for to-from > window { // only a line longer than the window gets here
-				if !yield(newChunk(d.Path(), line, line, text[from:from+window])) {
+				cut := from + window
+				for !utf8.RuneStart(text[cut]) { // never split a character
+					cut--
+				}
+				if !yield(newChunk(d.Path(), line, line, text[from:cut])) {
 					return
 				}
-				from, start = from+window, line
+				from, start = cut, line
 			}
 		}
 		if to > from {

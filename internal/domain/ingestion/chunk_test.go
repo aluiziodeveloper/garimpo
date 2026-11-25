@@ -83,8 +83,13 @@ func TestChunkIDIsTheIDOfPathLinesAndText(t *testing.T) {
 	}
 }
 
-func TestNewCutterRejectsAWindowBelowOne(t *testing.T) {
-	if _, err := NewCutter(0); !errors.Is(err, ErrInvalidWindow) {
-		t.Errorf("NewCutter(0) error = %v, want ErrInvalidWindow", err)
+func TestNewCutterRejectsAWindowSmallerThanACharacter(t *testing.T) {
+	for _, w := range []int{-1, 0, 3} {
+		if _, err := NewCutter(w); !errors.Is(err, ErrInvalidWindow) {
+			t.Errorf("NewCutter(%d) error = %v, want ErrInvalidWindow", w, err)
+		}
+	}
+	if _, err := NewCutter(4); err != nil {
+		t.Errorf("NewCutter(4) error = %v, want nil", err)
 	}
 }
