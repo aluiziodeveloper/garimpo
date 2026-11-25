@@ -42,12 +42,13 @@ if ! number="$(gh pr view "$branch" --json number,state --jq 'select(.state == "
   gh pr create --base "$main" --head "$branch" --title "$title" --body ""
   number="$(gh pr view "$branch" --json number --jq .number)"
 else
-  gh pr edit "$number" --title "$title"
+  # REST, not "gh pr edit": older gh versions fail there on the retired classic projects API.
+  gh api -X PATCH "repos/{owner}/{repo}/pulls/$number" -f title="$title" --silent
 fi
 echo "pull request #$number"
 
-# 3. Wait for the checks to show up, then for all of them to finish.
-for _ in $(seq 30); do
+# 3. Wait up to two minutes for the checks to show up, then for all of them to finish.
+for _ in $(seq 60); do
   if gh pr checks "$number" --json name --jq 'length' 2>/dev/null | grep -qv '^0$'; then
     break
   fi
