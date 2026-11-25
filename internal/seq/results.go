@@ -62,3 +62,38 @@ func (r Results[T]) Each(fn func(T)) error {
 	}
 	return nil
 }
+
+// Batch yields the values of r in slices of size values, the last one possibly shorter,
+// as the embedder takes them. Each slice is new: a caller may keep it after the step. An
+// error of r comes after the batch of the values before it. Batch panics if size is less
+// than 1: that is a bug in the caller, not an input to handle.
+//
+// Batch is a function, not a method: a method of Results[T] returning Results[[]T] is an
+// instantiation cycle, and a method Batch[B ~[]T] would make every caller write the type.
+func Batch[T any](r Results[T], size int) Results[[]T] {
+	if size < 1 {
+		panic("seq: Batch size must be at least 1")
+	}
+	return func(yield func([]T, error) bool) {
+		batch := make([]T, 0, size)
+		for v, err := range r {
+			if err != nil {
+				if len(batch) > 0 && !yield(batch, nil) {
+					return
+				}
+				yield(nil, err)
+				return
+			}
+			batch = append(batch, v)
+			if len(batch) == size {
+				if !yield(batch, nil) {
+					return
+				}
+				batch = make([]T, 0, size)
+			}
+		}
+		if len(batch) > 0 {
+			yield(batch, nil)
+		}
+	}
+}
