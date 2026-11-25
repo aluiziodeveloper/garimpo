@@ -73,7 +73,7 @@ func (c Cutter) Cut(d Document) iter.Seq[Chunk] {
 		for l := range strings.Lines(text) {
 			line++
 			if to > from && to-from+len(l) > window {
-				if !yield(newChunk(d.Path(), start, line-1, text[from:to])) {
+				if !yield(newChunk(d.Path(), from, start, line-1, text[from:to])) {
 					return
 				}
 				from, start = to, line
@@ -84,22 +84,23 @@ func (c Cutter) Cut(d Document) iter.Seq[Chunk] {
 				for !utf8.RuneStart(text[cut]) { // never split a character
 					cut--
 				}
-				if !yield(newChunk(d.Path(), line, line, text[from:cut])) {
+				if !yield(newChunk(d.Path(), from, line, line, text[from:cut])) {
 					return
 				}
 				from, start = cut, line
 			}
 		}
 		if to > from {
-			yield(newChunk(d.Path(), start, line, text[from:to]))
+			yield(newChunk(d.Path(), from, start, line, text[from:to]))
 		}
 	}
 }
 
-// newChunk returns the chunk with lines start to end of path. Cut always passes a valid
-// path (a Document's) and 1 <= start <= end, so NewChunkID cannot fail here.
-func newChunk(path string, start, end int, text string) Chunk {
-	id, err := shared.NewChunkID(path, start, end, text)
+// newChunk returns the chunk of path that starts at byte offset, with lines start to end.
+// Cut always passes a valid path (a Document's), an offset of 0 or more and
+// 1 <= start <= end, so NewChunkID cannot fail here.
+func newChunk(path string, offset, start, end int, text string) Chunk {
+	id, err := shared.NewChunkID(path, offset, start, end, text)
 	if err != nil {
 		panic(fmt.Sprintf("ingestion: chunk %s:%d-%d: %v", path, start, end, err))
 	}
