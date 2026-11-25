@@ -1,0 +1,32 @@
+version: "2"
+
+run:
+  go: "1.27"
+
+linters:
+  default: standard # errcheck, govet, ineffassign, staticcheck, unused
+  enable:
+    - errorlint    # errors compared or type-asserted without errors.Is/As
+    - gocritic     # common bugs and style problems
+    - misspell
+    - nolintlint   # every //nolint needs a linter name and a reason
+    - revive
+    - unparam
+  settings:
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment # struct layout is a measurement topic (module 11), not a lint rule
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+
+formatters:
+  enable:
+    - gofumpt
+  settings:
+    gofumpt:
+      module-path: github.com/aluiziodeveloper/garimpo
+      extra:
+        group-params: true   # func f(a, b int) instead of func f(a int, b int)
+        clothe-returns: true # no naked returns in functions with named results

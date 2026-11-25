@@ -25,6 +25,20 @@ belong to you. If your user has other IDs (`id -u`, `id -g`), build with them:
 UID=$(id -u) GID=$(id -g) docker compose build dev
 ```
 
+## Checks
+
+The same commands run in CI on every pull request:
+
+```bash
+docker compose exec dev go tool -modfile=tools/go.mod golangci-lint fmt --diff   # format (gofumpt)
+docker compose exec dev go tool -modfile=tools/go.mod golangci-lint run          # lint
+docker compose exec dev go test -race -count=1 ./...                            # tests, race detector on
+docker compose exec dev go build ./...
+```
+
+Development tools are pinned in `tools/go.mod`, apart from the project's `go.mod`, so their
+dependencies never mix with Garimpo's.
+
 ## Layout
 
 | Path | Contents |
@@ -32,6 +46,9 @@ UID=$(id -u) GID=$(id -g) docker compose build dev
 | `cmd/garimpo` | The binary: argument handling and wiring |
 | `docker/dev.Dockerfile` | The development container (Go 1.27.4) |
 | `compose.yaml` | Local services |
+| `tools/go.mod` | Pinned development tools (`go tool -modfile=tools/go.mod …`) |
+| `.golangci.yml` | Linters and formatter |
+| `.github/workflows/ci.yml` | CI: format, lint, race tests, build |
 
 ## License
 
