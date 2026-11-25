@@ -20,7 +20,7 @@ func (f fakeFinder) FindChunk(id ChunkID) (path string, start, end int, ok bool)
 
 func newFinder(t *testing.T) (fakeFinder, ChunkID) {
 	t.Helper()
-	id, err := NewChunkID("sync/mutex.go", 1, 30, "package sync")
+	id, err := NewChunkID("sync/mutex.go", 0, 1, 30, "package sync")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +56,7 @@ func TestNewCitation(t *testing.T) {
 
 func TestNewCitationRejectsWhatIsNotInTheCorpus(t *testing.T) {
 	chunks, id := newFinder(t)
-	other, _ := NewChunkID("sync/once.go", 1, 20, "package sync")
+	other, _ := NewChunkID("sync/once.go", 0, 1, 20, "package sync")
 	tests := []struct {
 		name       string
 		id         ChunkID

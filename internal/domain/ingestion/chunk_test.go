@@ -5,6 +5,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/aluiziodeveloper/garimpo/internal/domain/shared"
 )
 
 // file returns the document x.go with the given text.
@@ -80,6 +82,22 @@ func TestChunkIDIsTheIDOfPathLinesAndText(t *testing.T) {
 		if ch.ID().IsZero() || ch.Path() != "x.go" {
 			t.Errorf("chunk %d-%d: ID %v, path %q", ch.Start(), ch.End(), ch.ID(), ch.Path())
 		}
+	}
+}
+
+// TestEveryChunkHasItsOwnID cuts a line of 30 equal bytes into three equal pieces: same
+// path, same line, same text. As in time/tzdata/zzipdata.go, they are three chunks.
+func TestEveryChunkHasItsOwnID(t *testing.T) {
+	c, _ := NewCutter(10)
+	seen := make(map[shared.ChunkID]int) // ID -> position of the chunk in the cut
+	n := 0
+	for ch := range c.Cut(file(t, "a\n"+strings.Repeat("x", 30)+"\n")) {
+		if first, dup := seen[ch.ID()]; dup {
+			t.Errorf("chunk #%d (%d-%d %q) has the ID of chunk #%d", n, ch.Start(), ch.End(), ch.Text(), first)
+		} else {
+			seen[ch.ID()] = n
+		}
+		n++
 	}
 }
 

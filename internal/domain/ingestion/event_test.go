@@ -11,7 +11,7 @@ import (
 // chunkID returns the ID of line of a.go, as a one-line chunk.
 func chunkID(t *testing.T, line int) shared.ChunkID {
 	t.Helper()
-	id, err := shared.NewChunkID("a.go", line, line, "x\n")
+	id, err := shared.NewChunkID("a.go", 0, line, line, "x\n")
 	if err != nil {
 		t.Fatal(err)
 	}

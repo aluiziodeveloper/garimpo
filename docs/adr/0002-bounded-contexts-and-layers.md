@@ -45,8 +45,9 @@ reach into the others.
 5. **Value objects guard the invariants.** Unexported fields, one constructor that validates
    and returns an error wrapping a sentinel (`ErrInvalidChunkID`, `ErrInvalidVector`,
    `ErrInvalidCitation`), and a zero value that means "none" and is safe to use:
-   - `ChunkID` is the SHA-256 of path, line range and text, with NUL separators: the same
-     chunk gets the same ID in every run (RN02);
+   - `ChunkID` is the SHA-256 of path, byte offset, line range and text, with NUL
+     separators: the same chunk gets the same ID in every run (RN02), and two chunks never
+     share one (see Changes);
    - `Vector` copies its input, scales it to norm 1 with a float64 sum and never shares
      memory with the caller (RN07); `Dot` panics on a dimension mismatch;
    - `Citation` exists only for lines inside a chunk the `ChunkFinder` knows (RN01).
@@ -80,3 +81,13 @@ All taken on 2026-11-25 with Go 1.27.4.
   constructor error at the edge, with a message, not a score.
 - Every adapter translates into these types, and every use case receives them already valid.
 - A new layer rule is one entry in `.golangci.yml`, and breaking it fails the CI.
+
+## Changes
+
+- **2026-11-25, module 07: the byte offset joined the `ChunkID`.** The first ingestion of
+  the whole corpus failed with `chunk already handled`: the `IngestionRun` refused a chunk
+  it had already confirmed. A line longer than the window is split into pieces (lesson
+  06-07), and line 5 of `time/tzdata/zzipdata.go` has two pairs of equal 700-byte pieces:
+  same path, same line, same text, same ID. The corpus had 41,980 chunks and 41,978 IDs.
+  `NewChunkID` now takes the byte where the chunk starts in its file, so equal pieces are
+  different chunks, and the IDs of a run stay the same from one run to the next.

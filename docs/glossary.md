@@ -16,7 +16,7 @@ the lessons use the Portuguese word in parentheses.
 | **document** (documento) | One file of the corpus: a relative, slash-separated path and valid UTF-8 text (`ingestion.Document`) | 06-06 |
 | **chunk** (trecho) | A line range of one corpus file, the unit that is embedded, indexed and cited | 03-01 |
 | **window** (janela) | The most bytes a chunk holds: 700 by default (D15). Chunks take whole lines; only a line longer than the window is split, never inside a character (`ingestion.Cutter`) | 06-07 |
-| **`ChunkID`** | The SHA-256 of a chunk's path, line range and text: the same chunk has the same ID in every run (RN02) | 03-06 |
+| **`ChunkID`** | The SHA-256 of a chunk's path, byte offset, line range and text: the same chunk has the same ID in every run (RN02), and two chunks never share one (the offset since module 07) | 03-06 |
 | **vector** (vetor) | A chunk's embedding: the model's dimension and norm 1 (RN07), so a dot product is a cosine similarity | 03-07 |
 | **score** (nota) | How close a chunk is to a query: the dot product of their vectors, between -1 and 1 | 03-07 |
 | **citation** (citação) | Lines of a chunk that exists in the corpus, printed as `path:line` or `path:start-end` (RN01) | 03-08 |
