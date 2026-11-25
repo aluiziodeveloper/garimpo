@@ -53,6 +53,18 @@ the lessons use the Portuguese word in parentheses.
 | **`GODEBUG`** | An environment variable that switches runtime behaviours on or off, one `name=value` per setting | 01-07 |
 | **CPU quota** | A cgroup limit on CPU time per period (`cpus: 2` in Compose: 200 ms every 100 ms) | 01-06 |
 | **throttling** | The kernel stopping a cgroup that used its CPU quota until the next period. Counted in `nr_throttled` of `/sys/fs/cgroup/cpu.stat` | 01-07 |
+| **G, M, P** | The scheduler's three pieces: G is a goroutine, M an OS thread, P the right to run Go code. An M runs a G only while it holds a P, and there are `GOMAXPROCS` Ps | 04-02 |
+| **run queue** | The runnable goroutines waiting for a P: one local queue per P and a global one | 04-02 |
+| **parking** | A goroutine giving up its M and P while it waits on a channel, a timer, a lock or the network | 04-01 |
+| **blocking system call** | A call into the kernel the runtime cannot park, such as a read from a disk file: the goroutine keeps its M until it returns | 04-01, INC-04 |
+| **thread limit** | `runtime/debug.SetMaxThreads`, 10,000 by default: past it the program dies with `fatal error: thread exhaustion` | 04-01, INC-04 |
+| **`sysmon`** | A runtime thread that runs without a P. While any P is busy it checks every 20 µs to 10 ms, takes Ps back from system calls and preempts goroutines that ran too long | 04-03 |
+| **preemption** | The runtime stopping a running goroutine so another can use the P, after about 10 ms (`forcePreemptNS`) | 04-05 |
+| **asynchronous preemption** | Since Go 1.14, preemption by a signal at almost any instruction. `GODEBUG=asyncpreemptoff=1` turns it off | 04-05 |
+| **stack check** | The test at the start of most functions that grows the stack; it is also where cooperative preemption happens. Small leaf functions are `NOSPLIT` and have none | 04-06 |
+| **`schedtrace`** | `GODEBUG=schedtrace=N`: one line about the scheduler every N ms | 04-04 |
+| **execution trace** | The scheduler's events recorded by `runtime/trace` and read with `go tool trace` | 04-07 |
+| **scheduler latency** | Time a goroutine spends runnable before it runs (`go tool trace -pprof=sched`) | 04-07 |
 
 ## Infrastructure
 
