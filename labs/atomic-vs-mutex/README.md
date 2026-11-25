@@ -53,3 +53,23 @@ padded   total=20000000 in 52ms
 
 Only `padded` scales, and its `Load` reads every slot: a sum, not a snapshot (module 05,
 lesson 05-08).
+
+## Module 05 challenge: the largest value, without a lock
+
+`peak` keeps the largest value observed by many goroutines with a `CompareAndSwap` loop.
+`naivePeak` does `if v > Load() { Store(v) }`: every access is atomic, there is no data race,
+and a smaller value can overwrite a larger one between the `Load` and the `Store`.
+`TestPeakKeepsTheLargest` has 8 goroutines observe 0 to 79,999, 50 times; the naive version
+lost 79,999 in 28 of 200 runs in the `lab` service (2 CPUs) and in 157 of 200 in the `dev`
+service with `-race`, 2026-11-25:
+
+```
+--- PASS: TestPeakKeepsTheLargest (0.02s)
+--- PASS: TestPeakOfNothingIsZero (0.00s)
+--- PASS: TestPeakIgnoresSmallerValues (0.00s)
+    peak_test.go:64: naive peak lost the largest value in 28 of 200 runs
+--- PASS: TestNaivePeakLosesTheLargest (0.06s)
+```
+
+With `GOMAXPROCS=1` the naive test skips: the goroutines rarely interleave between the two
+steps, and the bug hides.
