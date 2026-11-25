@@ -5,10 +5,16 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+
+	"github.com/aluiziodeveloper/garimpo/internal/domain/shared"
 )
 
-// ErrInvalidRun is wrapped by the errors of NewRun and of a Fail without a reason.
+// ErrInvalidRun is wrapped by the errors of commands with an invalid argument: a blank ID,
+// a failure without a reason, the zero ChunkID.
 var ErrInvalidRun = errors.New("invalid ingestion run")
+
+// ErrChunkAlreadyHandled is wrapped when a run is told twice about the same chunk.
+var ErrChunkAlreadyHandled = errors.New("chunk already handled")
 
 // ErrInvalidTransition is wrapped by every transition the state machine rejects.
 var ErrInvalidTransition = errors.New("invalid ingestion run transition")
@@ -42,11 +48,19 @@ func (s State) String() string {
 //	                   running --Pause--> paused --Resume--> running
 //	                   running, paused --Fail--> failed
 //
+// Each accepted command records an Event; a rejected one records nothing. Documents are
+// discovered only while running; chunks still in flight may be confirmed or failed while
+// paused, and each chunk is handled once.
+//
 // Like the whole domain, a Run is sequential: one goroutine owns it.
 type Run struct {
 	id     string
 	state  State
 	reason string
+
+	documents, embedded, failed int
+	handled                     map[shared.ChunkID]struct{}
+	events                      []Event
 }
 
 // NewRun returns a pending run with the given ID, which must not be blank.
@@ -54,7 +68,7 @@ func NewRun(id string) (*Run, error) {
 	if strings.TrimSpace(id) == "" {
 		return nil, fmt.Errorf("%w: the ID is blank", ErrInvalidRun)
 	}
-	return &Run{id: id}, nil
+	return &Run{id: id, handled: make(map[shared.ChunkID]struct{})}, nil
 }
 
 // ID returns the run's ID.
@@ -67,26 +81,105 @@ func (r *Run) State() State { return r.state }
 func (r *Run) Reason() string { return r.reason }
 
 // Start begins a pending run.
-func (r *Run) Start() error { return r.move(Running, Pending) }
+func (r *Run) Start() error {
+	return r.moveAndRecord(RunStarted{Run: r.id}, Running, Pending)
+}
 
 // Pause stops a running run, which may resume later.
-func (r *Run) Pause() error { return r.move(Paused, Running) }
+func (r *Run) Pause() error {
+	return r.moveAndRecord(RunPaused{Run: r.id}, Paused, Running)
+}
 
 // Resume continues a paused run.
-func (r *Run) Resume() error { return r.move(Running, Paused) }
+func (r *Run) Resume() error {
+	return r.moveAndRecord(RunResumed{Run: r.id}, Running, Paused)
+}
 
 // Complete ends a running run that handled the whole corpus.
-func (r *Run) Complete() error { return r.move(Completed, Running) }
+func (r *Run) Complete() error {
+	done := RunCompleted{Run: r.id, Documents: r.documents, Embedded: r.embedded, Failed: r.failed}
+	return r.moveAndRecord(done, Completed, Running)
+}
 
 // Fail ends a running or paused run because of an error; reason says which.
 func (r *Run) Fail(reason string) error {
 	if reason == "" {
 		return fmt.Errorf("%w: a failure needs a reason", ErrInvalidRun)
 	}
-	if err := r.move(Failed, Running, Paused); err != nil {
+	if err := r.moveAndRecord(RunFailed{Run: r.id, Reason: reason}, Failed, Running, Paused); err != nil {
 		return err
 	}
 	r.reason = reason
+	return nil
+}
+
+// DiscoverDocument records a document the running run read from the corpus.
+func (r *Run) DiscoverDocument(d Document) error {
+	if err := r.require(Running); err != nil {
+		return err
+	}
+	r.documents++
+	r.events = append(r.events, DocumentDiscovered{Run: r.id, Path: d.Path()})
+	return nil
+}
+
+// ConfirmChunk records that the chunk id got its vector.
+func (r *Run) ConfirmChunk(id shared.ChunkID) error {
+	if err := r.handle(id); err != nil {
+		return err
+	}
+	r.embedded++
+	r.events = append(r.events, ChunkEmbedded{Run: r.id, Chunk: id})
+	return nil
+}
+
+// FailChunk records that the embedder gave up on the chunk id; reason says why.
+func (r *Run) FailChunk(id shared.ChunkID, reason string) error {
+	if err := r.handle(id); err != nil {
+		return err
+	}
+	r.failed++
+	r.events = append(r.events, ChunkFailed{Run: r.id, Chunk: id, Reason: reason})
+	return nil
+}
+
+// TakeEvents returns the events recorded since the last call, oldest first, and forgets
+// them: whoever takes them is now responsible for them.
+func (r *Run) TakeEvents() []Event {
+	events := r.events
+	r.events = nil
+	return events
+}
+
+// handle marks the chunk id as handled, if the run accepts chunks and has not seen it.
+func (r *Run) handle(id shared.ChunkID) error {
+	switch err := r.require(Running, Paused); {
+	case err != nil:
+		return err
+	case id.IsZero():
+		return fmt.Errorf("%w: the zero ChunkID identifies no chunk", ErrInvalidRun)
+	}
+	if _, seen := r.handled[id]; seen {
+		return fmt.Errorf("%w: %s", ErrChunkAlreadyHandled, id)
+	}
+	r.handled[id] = struct{}{}
+	return nil
+}
+
+// require returns an error unless the run is in one of the states.
+func (r *Run) require(states ...State) error {
+	if !slices.Contains(states, r.state) {
+		return fmt.Errorf("%w: a %s run does not take this command", ErrInvalidTransition, r.state)
+	}
+	return nil
+}
+
+// moveAndRecord moves the run to to, as move does, and records e if it moved.
+func (r *Run) moveAndRecord(e Event, to State, from ...State) error {
+	if err := r.move(to, from...); err != nil {
+		return err
+	}
+	r.events = append(r.events, e)
 	return nil
 }
 
