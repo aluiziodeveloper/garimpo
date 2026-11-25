@@ -89,8 +89,9 @@ GitHub Actions, with titles that pass the same check.
 | Path | Contents |
 |---|---|
 | `cmd/garimpo` | The binary: argument handling and wiring |
+| `labs/` | Labs: one small program per Go feature, outside the architecture (each has its README) |
 | `docker/dev.Dockerfile` | The development container (Go 1.27.4) |
-| `compose.yaml` | Local services: `dev` and `ollama` |
+| `compose.yaml` | Local services: `dev`, `ollama` and `lab` (profile `labs`, CPU quota `LAB_CPUS`) |
 | `tools/go.mod` | Pinned development tools (`go tool -modfile=tools/go.mod …`) |
 | `.golangci.yml` | Linters and formatter |
 | `.github/workflows/ci.yml` | CI: format, lint, race tests, build |
