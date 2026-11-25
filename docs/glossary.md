@@ -19,6 +19,7 @@ the lessons use the Portuguese word in parentheses.
 | **score** (nota) | How close a chunk is to a query: the dot product of their vectors, between -1 and 1 | 03-07 |
 | **citation** (citação) | Lines of a chunk that exists in the corpus, printed as `path:line` or `path:start-end` (RN01) | 03-08 |
 | **ingestion run** (rodada de coleta) | One pass of reading, cutting and embedding the corpus, which can be paused and resumed | 03-02 |
+| **progress** (progresso) | What an ingestion run has done so far: documents read, chunks cut, embedded and failed, and the pending ones. A snapshot of it is one moment of the run (`ingestion.Progress`) | 05-07 |
 | **index snapshot** (fotografia do índice) | An immutable, complete version of the index; a query only ever reads one (RN05) | 03-02 |
 | **hit** (acerto) | A chunk returned by a search, with its score | 03-02 |
 | **answer** (resposta) | Generated text grounded in chunks, with citations | 03-02 |
@@ -65,6 +66,15 @@ the lessons use the Portuguese word in parentheses.
 | **`schedtrace`** | `GODEBUG=schedtrace=N`: one line about the scheduler every N ms | 04-04 |
 | **execution trace** | The scheduler's events recorded by `runtime/trace` and read with `go tool trace` | 04-07 |
 | **scheduler latency** | Time a goroutine spends runnable before it runs (`go tool trace -pprof=sched`) | 04-07 |
+| **data race** | Two goroutines accessing the same memory, at least one writing and not both atomically, with no happens-before order between them. `c++` from two goroutines loses adds | 05-01 |
+| **happens before** | The memory model's order between two operations: within a goroutine, program order; across goroutines, a synchronization (channel, lock, atomic, `go`). A read sees a write only if the write happens before it | 05-02 |
+| **synchronized before** | The edge a synchronization creates between goroutines, such as a send and the matching receive, or an `Unlock` and the next `Lock` | 05-03 |
+| **DRF-SC** | The memory model's promise: a program with no data races behaves as if its goroutines ran interleaved on one processor | 05-03 |
+| **typed atomic** | `atomic.Int64`, `atomic.Bool`, `atomic.Pointer[T]` and the others: every access is atomic, and `c++` does not compile | 05-05 |
+| **compare-and-swap (CAS)** | An atomic "write the new value only if it is still the old one"; a loop of them updates a value lock-free | 05-05 |
+| **`noCopy`** | A field of the atomic and `sync` types that makes `go vet` (copylocks) report a copy, such as passing a `Progress` by value | 05-07 |
+| **false sharing** | Goroutines writing different variables on the same 64-byte cache line, which slows them down as if they shared one | 05-06 |
+| **check-then-act** | Reading a value and acting on it as two steps: correct for one goroutine, wrong for two even when both steps are atomic (`sync.Once` does it in one) | 05-04 |
 
 ## Infrastructure
 
