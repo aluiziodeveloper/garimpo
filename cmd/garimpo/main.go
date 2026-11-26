@@ -110,6 +110,9 @@ func ingestCorpus(args []string, out io.Writer) error {
 		_, err = fmt.Fprintf(out, "the run in %s is completed already: nothing to do\n", *journalPath)
 		return err
 	}
+	if run.State() == ingestion.Failed { // final: no transition leaves it
+		return fmt.Errorf("ingest: the run in %s failed (%s): remove the journal to start over", *journalPath, run.Reason())
+	}
 	var embedder ingest.Embedder = &ollama.Embedder{
 		URL: *url, Model: *model, Dim: *dim, Context: *ctxTokens, NumThread: threads,
 	}
