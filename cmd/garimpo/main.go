@@ -15,6 +15,7 @@ import (
 	"github.com/aluiziodeveloper/garimpo/internal/adapters/corpus"
 	"github.com/aluiziodeveloper/garimpo/internal/adapters/ollama"
 	ingest "github.com/aluiziodeveloper/garimpo/internal/app/ingestion"
+	"github.com/aluiziodeveloper/garimpo/internal/app/limiter"
 	"github.com/aluiziodeveloper/garimpo/internal/domain/ingestion"
 )
 
@@ -79,6 +80,7 @@ func ingestCorpus(args []string, out io.Writer) error {
 	ctxTokens := fl.Int("context", 512, "the model's context in tokens; a longer chunk fails")
 	batch := fl.Int("batch", 1, "the most chunks in one request to the model; 1 sends them one by one")
 	wait := fl.Duration("batch-wait", 10*time.Millisecond, "how long a batch waits to fill up")
+	adaptive := fl.Bool("adaptive", false, "move the calls to the model at the same time with their latency, up to -workers (RN04)")
 	if err := fl.Parse(args); err != nil {
 		return err
 	}
@@ -103,8 +105,19 @@ func ingestCorpus(args []string, out io.Writer) error {
 	}
 	progress := new(ingest.Progress)
 	cfg := ingest.Config{Workers: *workers, Embedder: embedder, Progress: progress}
+	if *adaptive {
+		l, lerr := limiter.New(limiter.Config{Max: *workers})
+		if lerr != nil {
+			return fmt.Errorf("ingest: %w", lerr)
+		}
+		cfg.Limiter = l
+	}
 	start := time.Now()
 	err = ingest.RunIngestion(context.Background(), run, corpus.Walk(os.DirFS(*dir)), cfg)
-	_, perr := fmt.Fprintf(out, "%s %s in %s\n", run.State(), progress.Snapshot(), time.Since(start).Round(time.Millisecond))
+	limit := ""
+	if cfg.Limiter != nil {
+		limit = fmt.Sprintf(" (adaptive limit %d of %d)", cfg.Limiter.Limit(), *workers)
+	}
+	_, perr := fmt.Fprintf(out, "%s %s in %s%s\n", run.State(), progress.Snapshot(), time.Since(start).Round(time.Millisecond), limit)
 	return errors.Join(err, perr)
 }

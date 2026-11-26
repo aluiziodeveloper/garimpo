@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aluiziodeveloper/garimpo/internal/app/limiter"
 	domain "github.com/aluiziodeveloper/garimpo/internal/domain/ingestion"
 	"github.com/aluiziodeveloper/garimpo/internal/domain/shared"
 )
@@ -286,4 +287,71 @@ func TestAnEmbedderThatBreaksItsContractFailsTheRun(t *testing.T) {
 	if run.State() != domain.Failed {
 		t.Fatalf("run is %s, want failed: a lost vector is a bug, not a failed chunk", run.State())
 	}
+}
+
+// TestTheLimiterBoundsTheCallsToTheEmbedder is RN04: with a limiter, the calls to the
+// embedder at the same time never pass its limit, however many workers there are.
+func TestTheLimiterBoundsTheCallsToTheEmbedder(t *testing.T) {
+	var mu sync.Mutex
+	var now, most int
+	f := fakeEmbedder{}
+	var events []domain.Event
+	run, cfg := setup(t, &f, &events)
+	cfg.Workers = 8
+	cfg.Embedder = embedderFunc(func(ctx context.Context, texts []string) ([]shared.Vector, error) {
+		mu.Lock()
+		now++
+		most = max(most, now)
+		mu.Unlock()
+		time.Sleep(time.Millisecond) // a slow model: the workers pile up
+		mu.Lock()
+		now--
+		mu.Unlock()
+		return f.Embed(ctx, texts)
+	})
+	l, err := limiter.New(limiter.Config{Max: 2, Initial: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Limiter = l
+
+	if err := RunIngestion(t.Context(), run, oneLiners(t, 100), cfg); err != nil {
+		t.Fatal(err)
+	}
+	if most > 2 {
+		t.Fatalf("%d calls to the embedder at once, want at most the limit, 2 (RN04)", most)
+	}
+	if f.total != 100 {
+		t.Fatalf("%d chunks embedded, want 100", f.total)
+	}
+}
+
+// A failed chunk gives its permit back without a sample: a text over the context fails
+// fast, and its latency would make the model look faster than it is.
+func TestAFailedChunkGivesItsPermitBack(t *testing.T) {
+	f := fakeEmbedder{fail: func(string) error { return errModel }}
+	var events []domain.Event
+	run, cfg := setup(t, &f, &events)
+	l, err := limiter.New(limiter.Config{Max: 4, Initial: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Limiter = l
+
+	if err := RunIngestion(t.Context(), run, oneLiners(t, 50), cfg); err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Progress.Snapshot(); got.Failed != 50 {
+		t.Fatalf("progress = %v, want all 50 failed", got)
+	}
+	if in, lim := l.InFlight(), l.Limit(); in != 0 || lim != 3 {
+		t.Fatalf("%d permits out and limit %d after the run, want 0 and 3", in, lim)
+	}
+}
+
+// embedderFunc is an Embedder made of a function.
+type embedderFunc func(ctx context.Context, texts []string) ([]shared.Vector, error)
+
+func (f embedderFunc) Embed(ctx context.Context, texts []string) ([]shared.Vector, error) {
+	return f(ctx, texts)
 }
