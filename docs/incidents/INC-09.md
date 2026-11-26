@@ -10,9 +10,10 @@
 
 The ingestion has a fixed number of workers, and every worker calls the model. More
 workers looked like more speed: a stage that waits scales past the CPUs (lesson 07-05).
-But the model is not a stage that waits. Ollama on the CPU serves about one call at a time,
-and the other calls wait in a queue in front of it. Sixteen workers embedded the corpus as
-fast as one, and each call took sixteen times as long.
+But the model is not a stage that waits. Ollama takes up to four requests at a time
+(`OLLAMA_NUM_PARALLEL` 4), and all of them share the same 4 CPUs: its throughput is the
+same with one caller as with sixteen, as if it served about one call at a time. Sixteen
+workers embedded the corpus as fast as one, and each call took sixteen times as long.
 
 Nothing failed and nothing was slower in total, so no check saw it. The cost is in the
 latency: from module 16 on, a search query calls the same model, and it would wait behind
@@ -32,8 +33,8 @@ The same 1,038 chunks, one run per row:
 
 The throughput λ stays near 33 chunks/s; the latency grows with the workers. Little's law,
 L = λ·W, gives the calls in the system: with 16 workers there are 15.90, and the model
-serves one of them while the others queue. A call of 502 ms is about 30 ms of work and
-470 ms of waiting.
+gets through them no faster than through one. A call of 502 ms is about 30 ms of work and
+470 ms of waiting, whether in Ollama's queue or for its CPUs.
 
 ## Cause
 
