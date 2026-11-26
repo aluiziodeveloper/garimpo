@@ -87,7 +87,11 @@ func BenchmarkAdaptive(b *testing.B) {
 				if err := ingest.RunIngestion(b.Context(), run, corpus.Walk(os.DirFS(dir)), cfg); err != nil {
 					b.Fatal(err)
 				}
-				chunks += int(progress.Snapshot().Embedded)
+				counts := progress.Snapshot()
+				if counts.Failed > 0 { // with no model, every chunk fails and the run still completes
+					b.Fatalf("%d of %d chunks failed: is Ollama up at %s?", counts.Failed, counts.Chunks, url)
+				}
+				chunks += int(counts.Embedded)
 			}
 			b.ReportMetric(float64(chunks)/b.Elapsed().Seconds(), "chunks/s")
 			b.ReportMetric(e.percentile(0.50), "p50-ms")
