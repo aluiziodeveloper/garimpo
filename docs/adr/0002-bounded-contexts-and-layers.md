@@ -101,3 +101,9 @@ All taken on 2026-11-25 with Go 1.27.4.
   same path, same line, same text, same ID. The corpus had 41,980 chunks and 41,978 IDs.
   `NewChunkID` now takes the byte where the chunk starts in its file, so equal pieces are
   different chunks, and the IDs of a run stay the same from one run to the next.
+- **2026-11-26, module 11: `internal/vec`, a second support package outside the layers.** It
+  holds the dot product (`vec.Dot(a, b []float32)`), which every search calls once per
+  vector of the index. It works on plain `[]float32`, so the domain keeps the rules (the
+  `Vector` checks the dimension and calls `vec.Dot`) and `vec` keeps the speed: the faster
+  versions of module 11, SIMD included, change one package and no layer. The same rules as
+  `internal/seq` apply: no business rules, only the standard library, any layer may import it.

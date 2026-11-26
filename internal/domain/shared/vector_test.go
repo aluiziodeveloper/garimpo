@@ -100,3 +100,21 @@ func TestZeroVector(t *testing.T) {
 		t.Errorf("zero Vector: IsZero() = %v, Dim() = %d", v.IsZero(), v.Dim())
 	}
 }
+
+// Every search calls Dot once for each vector of the index: 384 is the dimension of
+// all-minilm, the model of the course.
+func BenchmarkVectorDot(b *testing.B) {
+	values := make([]float32, 384)
+	for i := range values {
+		values[i] = float32(i%7) - 3
+	}
+	v, err := NewVector(values, 384)
+	if err != nil {
+		b.Fatal(err)
+	}
+	for b.Loop() {
+		sinkScore = v.Dot(v)
+	}
+}
+
+var sinkScore float32
