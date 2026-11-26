@@ -2,14 +2,18 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
 	"runtime"
+	"strconv"
+	"time"
 
 	"github.com/aluiziodeveloper/garimpo/internal/adapters/corpus"
+	"github.com/aluiziodeveloper/garimpo/internal/adapters/ollama"
 	ingest "github.com/aluiziodeveloper/garimpo/internal/app/ingestion"
 	"github.com/aluiziodeveloper/garimpo/internal/domain/ingestion"
 )
@@ -35,6 +39,8 @@ func run(args []string, out io.Writer) error {
 		return err
 	case "scan":
 		return scan(args[1:], out)
+	case "ingest":
+		return ingestCorpus(args[1:], out)
 	default:
 		return fmt.Errorf("unknown command %q", args[0])
 	}
@@ -59,4 +65,36 @@ func scan(args []string, out io.Writer) error {
 	}
 	_, err = fmt.Fprintln(out, survey)
 	return err
+}
+
+// ingestCorpus runs the ingestion over the corpus with an embedding model on Ollama and
+// prints how the run ended, its counts and how long it took.
+func ingestCorpus(args []string, out io.Writer) error {
+	fl := flag.NewFlagSet("ingest", flag.ContinueOnError)
+	dir := fl.String("corpus", "/usr/local/go/src", "the corpus directory")
+	workers := fl.Int("workers", 4, "goroutines calling the model")
+	url := fl.String("ollama", os.Getenv("GARIMPO_OLLAMA_URL"), "the Ollama server")
+	model := fl.String("model", "all-minilm:22m", "the embedding model")
+	dim := fl.Int("dim", 384, "the dimension of the model's vectors")
+	if err := fl.Parse(args); err != nil {
+		return err
+	}
+	if *url == "" {
+		return errors.New("ingest: no Ollama: set GARIMPO_OLLAMA_URL or -ollama")
+	}
+	threads, _ := strconv.Atoi(os.Getenv("GARIMPO_OLLAMA_NUM_THREAD")) // empty: Ollama decides
+	run, err := ingestion.NewRun("ingest")
+	if err != nil {
+		return err
+	}
+	progress := new(ingest.Progress)
+	cfg := ingest.Config{
+		Workers:  *workers,
+		Embedder: &ollama.Embedder{URL: *url, Model: *model, Dim: *dim, NumThread: threads},
+		Progress: progress,
+	}
+	start := time.Now()
+	err = ingest.RunIngestion(context.Background(), run, corpus.Walk(os.DirFS(*dir)), cfg)
+	_, perr := fmt.Fprintf(out, "%s %s in %s\n", run.State(), progress.Snapshot(), time.Since(start).Round(time.Millisecond))
+	return errors.Join(err, perr)
 }
