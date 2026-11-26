@@ -38,11 +38,14 @@ call 3 at 751ms: flaky
 call 4 at 1.751s: <nil>
 ```
 
-## Wait is not a memory barrier
+## The fake clock orders nothing
 
-`synctest.Wait` says the other goroutines are blocked; it does not say their writes are
-visible. With a plain `int` for the count of calls, the race detector reports the read
-after `Wait` against the `calls++` of the retry's goroutine (`WARNING: DATA RACE`,
+`synctest.Wait` synchronizes: what the other goroutines did before they blocked happens
+before `Wait` returns, so the read after it sees the first `calls++`. The clock moving is
+not a synchronization. The test reads the count after the first `Wait`, sleeps, and the
+retry's goroutine, woken by its timer, writes the count again; nothing orders that read
+before that write. With a plain `int`, the race detector reports exactly that pair: the read
+after the first `Wait` against the second `calls++` (`WARNING: DATA RACE`,
 `race detected during execution of test`). The test counts with an `atomic.Int64`.
 
 ## No real network in a bubble
