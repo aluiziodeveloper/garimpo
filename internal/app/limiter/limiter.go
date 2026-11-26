@@ -21,6 +21,7 @@ var ErrInvalidConfig = errors.New("invalid limiter config")
 const (
 	DefaultTolerance = 1.5
 	DefaultBackoff   = 0.9
+	DefaultWindow    = 100
 )
 
 // smoothing is the weight of the last call in the mean latency, as in TCP's smoothed
@@ -39,6 +40,10 @@ type Config struct {
 	// Backoff multiplies the limit when it goes down. Between 0 and 1; zero means
 	// DefaultBackoff.
 	Backoff float64
+	// Window is how many calls a base lasts: after each window, the base is the lowest mean
+	// of the window just ended, so it follows a service that gets slower for good. Zero
+	// means DefaultWindow.
+	Window int
 }
 
 // Limiter lets at most Limit calls run at the same time and moves the limit with their
@@ -52,7 +57,9 @@ type Limiter struct {
 	waiting  []chan struct{} // calls waiting for a slot, first come first served
 	fast     int             // fast calls with the limit in use since the last change
 	mean     time.Duration   // smoothed latency of the calls
-	base     time.Duration   // the lowest mean seen: the latency with no queue
+	base     time.Duration   // the lowest mean of the window: the latency with no queue
+	winMin   time.Duration   // the lowest mean of the window so far
+	winCalls int             // calls of the window so far
 	cuts     int             // how many times the limit went down
 }
 
@@ -70,10 +77,13 @@ func New(cfg Config) (*Limiter, error) {
 	if cfg.Backoff == 0 {
 		cfg.Backoff = DefaultBackoff
 	}
+	if cfg.Window == 0 {
+		cfg.Window = DefaultWindow
+	}
 	if cfg.Min < 1 || cfg.Max < cfg.Min || cfg.Initial < cfg.Min || cfg.Initial > cfg.Max ||
-		cfg.Tolerance <= 1 || cfg.Backoff <= 0 || cfg.Backoff >= 1 {
-		return nil, fmt.Errorf("%w: min %d, max %d, initial %d, tolerance %g, backoff %g",
-			ErrInvalidConfig, cfg.Min, cfg.Max, cfg.Initial, cfg.Tolerance, cfg.Backoff)
+		cfg.Tolerance <= 1 || cfg.Backoff <= 0 || cfg.Backoff >= 1 || cfg.Window < 1 {
+		return nil, fmt.Errorf("%w: min %d, max %d, initial %d, tolerance %g, backoff %g, window %d",
+			ErrInvalidConfig, cfg.Min, cfg.Max, cfg.Initial, cfg.Tolerance, cfg.Backoff, cfg.Window)
 	}
 	return &Limiter{cfg: cfg, limit: cfg.Initial}, nil
 }
@@ -178,9 +188,7 @@ func (p Permit) finish(rtt time.Duration) {
 	} else {
 		l.mean += time.Duration(float64(rtt-l.mean) * smoothing)
 	}
-	if l.base == 0 || l.mean < l.base {
-		l.base = l.mean
-	}
+	l.sampleBaseLocked()
 	if p.cuts != l.cuts {
 		return // started before the last cut: its latency is of the old limit
 	}
@@ -195,5 +203,22 @@ func (p Permit) finish(rtt time.Duration) {
 			l.limit = min(l.cfg.Max, l.limit+1)
 			l.fast = 0
 		}
+	}
+}
+
+// sampleBaseLocked keeps the base at the lowest mean seen, and refreshes it at the end of
+// each window with the lowest mean of that window: a base kept forever would take a service
+// that got slower for good for a queue that never drains, and pin the limit at Min.
+func (l *Limiter) sampleBaseLocked() {
+	if l.winMin == 0 || l.mean < l.winMin {
+		l.winMin = l.mean
+	}
+	if l.base == 0 || l.mean < l.base {
+		l.base = l.mean
+	}
+	l.winCalls++
+	if l.winCalls >= l.cfg.Window {
+		l.base = l.winMin
+		l.winMin, l.winCalls = 0, 0
 	}
 }

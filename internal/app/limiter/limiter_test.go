@@ -42,6 +42,7 @@ func TestNewRejectsABadConfig(t *testing.T) {
 		"tolerance of 1":   {Max: 4, Tolerance: 1},
 		"backoff of 1":     {Max: 4, Backoff: 1},
 		"negative backoff": {Max: 4, Backoff: -0.5},
+		"negative window":  {Max: 4, Window: -1},
 	} {
 		if _, err := New(cfg); !errors.Is(err, ErrInvalidConfig) {
 			t.Errorf("%s: err = %v, want ErrInvalidConfig", name, err)

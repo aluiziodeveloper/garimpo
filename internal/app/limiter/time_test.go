@@ -171,10 +171,10 @@ func TestTheLimitGrowsWithTheCapacity(t *testing.T) {
 	})
 }
 
-// The base is the lowest mean latency ever seen, so a service that gets slower for good
-// looks like a queue that never drains: the limit goes down to Min and stays. It is safe
-// (fewer calls, never more), and it is the limit of this AIMD (the module's challenge).
-func TestASlowerServicePinsTheLimitAtMin(t *testing.T) {
+// A service that gets slower for good, from 30 to 120 ms a call, still serves eight calls at
+// a time. The base follows it, one window of calls later: the limit goes down while the
+// latency climbs, then back up to the capacity.
+func TestTheLimitRecoversFromASlowerService(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		l := newLimiter(t, limiter.Config{Max: 16})
 		svc := newService(8)
@@ -184,8 +184,8 @@ func TestASlowerServicePinsTheLimitAtMin(t *testing.T) {
 		}()
 		st := load(t, l, svc)
 		t.Logf("%v, mean %v, limit at most %d, at the end %d", st.elapsed, st.mean, st.maxLimit, l.Limit())
-		if got := l.Limit(); got != 1 {
-			t.Errorf("limit %d at the end, want Min 1", got)
+		if got := l.Limit(); got < 8 {
+			t.Errorf("limit %d at the end, want at least the capacity, 8", got)
 		}
 	})
 }
