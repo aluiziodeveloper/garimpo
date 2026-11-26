@@ -18,9 +18,13 @@ import (
 
 const fakeDim = 4
 
+// fakeContext is the fake model's context, in bytes instead of tokens.
+const fakeContext = 64
+
 // fakeOllama answers POST /api/embed the way Ollama does, with a vector of fakeDim values
-// taken from the SHA-256 of each input. It keeps the last request. Set reply to change
-// the answer.
+// taken from the SHA-256 of each input. Like Ollama, it cuts an input over fakeContext in
+// silence, unless the request says "truncate": false; then it fails the request. It
+// keeps the last request. Set reply to change the answer.
 type fakeOllama struct {
 	mu    sync.Mutex
 	last  map[string]any
@@ -51,6 +55,13 @@ func (f *fakeOllama) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	embeddings := make([][]float32, len(input))
 	for i, text := range input {
+		if len(text) > fakeContext {
+			if req["truncate"] == false {
+				http.Error(w, `{"error":"the input length exceeds the context length"}`, http.StatusBadRequest)
+				return
+			}
+			text = text[:fakeContext]
+		}
 		sum := sha256.Sum256([]byte(text))
 		for j := range fakeDim {
 			embeddings[i] = append(embeddings[i], float32(sum[j])-127.5)
@@ -64,11 +75,16 @@ func newEmbedder(t *testing.T, f *fakeOllama) *Embedder {
 	t.Helper()
 	srv := httptest.NewServer(f)
 	t.Cleanup(srv.Close)
-	return &Embedder{URL: srv.URL, Model: "all-minilm:22m", Dim: fakeDim, NumThread: 4, Client: srv.Client()}
+	return &Embedder{
+		URL: srv.URL, Model: "all-minilm:22m", Dim: fakeDim, Context: 512, NumThread: 4,
+		Client: srv.Client(),
+	}
 }
 
 func TestEmbedderMeetsTheContract(t *testing.T) {
-	embeddertest.Contract(t, func(t *testing.T) ingestion.Embedder { return newEmbedder(t, new(fakeOllama)) })
+	embeddertest.Contract(t, func(t *testing.T) ingestion.Embedder {
+		return newEmbedder(t, new(fakeOllama))
+	}, strings.Repeat("x", fakeContext+1))
 }
 
 func TestEmbedSpeaksOllamasAPI(t *testing.T) {
@@ -80,7 +96,7 @@ func TestEmbedSpeaksOllamasAPI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := `{"input":["a","b"],"model":"all-minilm:22m","options":{"num_thread":4}}`
+	want := `{"input":["a","b"],"model":"all-minilm:22m","options":{"num_ctx":512,"num_thread":4},"truncate":false}`
 	if string(got) != want {
 		t.Errorf("request = %s, want %s", got, want)
 	}
@@ -125,6 +141,6 @@ func TestOllamaMeetsTheContract(t *testing.T) {
 		t.Skip("GARIMPO_OLLAMA_URL is not set")
 	}
 	embeddertest.Contract(t, func(*testing.T) ingestion.Embedder {
-		return &Embedder{URL: url, Model: "all-minilm:22m", Dim: 384, NumThread: 4}
-	})
+		return &Embedder{URL: url, Model: "all-minilm:22m", Dim: 384, Context: 512, NumThread: 4}
+	}, strings.Repeat("0x7f, ", 600)) // about 1,800 tokens
 }

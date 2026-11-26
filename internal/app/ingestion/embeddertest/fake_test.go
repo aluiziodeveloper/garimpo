@@ -1,6 +1,7 @@
 package embeddertest_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/aluiziodeveloper/garimpo/internal/app/ingestion"
@@ -8,7 +9,9 @@ import (
 )
 
 func TestFakeMeetsTheContract(t *testing.T) {
-	embeddertest.Contract(t, func(*testing.T) ingestion.Embedder { return new(embeddertest.Fake) })
+	embeddertest.Contract(t, func(*testing.T) ingestion.Embedder {
+		return &embeddertest.Fake{Context: 64}
+	}, strings.Repeat("x", 65))
 }
 
 func TestFakeRecordsEachCall(t *testing.T) {

@@ -76,6 +76,7 @@ func ingestCorpus(args []string, out io.Writer) error {
 	url := fl.String("ollama", os.Getenv("GARIMPO_OLLAMA_URL"), "the Ollama server")
 	model := fl.String("model", "all-minilm:22m", "the embedding model")
 	dim := fl.Int("dim", 384, "the dimension of the model's vectors")
+	ctxTokens := fl.Int("context", 512, "the model's context in tokens; a longer chunk fails")
 	if err := fl.Parse(args); err != nil {
 		return err
 	}
@@ -90,7 +91,7 @@ func ingestCorpus(args []string, out io.Writer) error {
 	progress := new(ingest.Progress)
 	cfg := ingest.Config{
 		Workers:  *workers,
-		Embedder: &ollama.Embedder{URL: *url, Model: *model, Dim: *dim, NumThread: threads},
+		Embedder: &ollama.Embedder{URL: *url, Model: *model, Dim: *dim, Context: *ctxTokens, NumThread: threads},
 		Progress: progress,
 	}
 	start := time.Now()
