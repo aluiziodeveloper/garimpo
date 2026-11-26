@@ -23,7 +23,9 @@ the lessons use the Portuguese word in parentheses.
 | **ingestion run** (rodada de coleta) | One pass of reading, cutting and embedding the corpus, which can be paused and resumed | 03-02 |
 | **pending chunk** (trecho pendente) | A chunk cut and not yet embedded or failed. RN03 bounds how many exist at once (`Config.MaxPending`, 256 by default) | 07-09 |
 | **concurrency limit** (limite de concorrência) | How many calls may go to the embedding model at the same time, moved by the adaptive limiter (`Config.Limiter`). RN04: no new call starts above it; when it goes down, the calls in flight finish | 09-07 |
+| **journal** (diário) | The file of a run's events, in the order the run recorded them, one line each with the CRC-32C of its JSON (`journal.File`). A chunk confirmed in it is never embedded again (RN02) | 10-05 |
 | **progress** (progresso) | What an ingestion run has done so far: documents read, chunks cut, embedded and failed, and the pending ones. A snapshot of it is one moment of the run (`ingestion.Progress`) | 05-07 |
+| **skipped chunk** (trecho pulado) | A chunk a resumed run cuts and does not embed, because the journal has it as confirmed or failed (`skipped=` in the progress) | 10-07 |
 | **index snapshot** (fotografia do índice) | An immutable, complete version of the index; a query only ever reads one (RN05) | 03-02 |
 | **hit** (acerto) | A chunk returned by a search, with its score | 03-02 |
 | **answer** (resposta) | Generated text grounded in chunks, with citations | 03-02 |
@@ -55,6 +57,9 @@ the lessons use the Portuguese word in parentheses.
 | **adaptive limiter** | A concurrency limit that follows the latency of the calls instead of a fixed number: `internal/app/limiter`, AIMD with a tolerance of 1.5 times the base and a backoff of 0.9 | 09-05 |
 | **base latency** | The latency of a call with no queue. The limiter takes the lowest smoothed mean it saw (weight 1/8), so a service that gets slower for good pins the limit at `Min` | 09-05 |
 | **permit** | The right to make one call, from `Acquire`. `Done` ends a call that worked and gives its latency to the limiter; `Discard` ends one that failed or was canceled, with no sample | 09-05 |
+| **write-ahead log (WAL)** | A log written before the state it records is acted on, so that a crash loses nothing that was confirmed: Garimpo's journal | 10-02 |
+| **event sourcing** | Keeping the events as the truth and the state as what they add up to: `ingestion.RestoreRun` rebuilds a run by running again the command each event records | 10-02 |
+| **graceful shutdown** | Stopping on request without losing work: no new work starts, the work in flight finishes and is recorded, the run pauses. `SIGTERM` does it for `garimpo ingest`; a second signal ends the process | 10-08 |
 
 ## Go and runtime
 
@@ -105,6 +110,12 @@ the lessons use the Portuguese word in parentheses.
 | **durably blocked** | A goroutine of a bubble blocked on something only the bubble can wake: a channel made in the bubble, `sync.WaitGroup.Wait`, `sync.Cond.Wait`, `time.Sleep`. A `sync.Mutex` and a real socket are not | 08-05 |
 | **`synctest.Wait`** | Waits until every other goroutine of the bubble is durably blocked; what they did before blocking happens before it returns. The fake clock moving orders nothing: a read before it and a write it wakes up race (lesson 08-06) | 08-06 |
 | **in-memory network** | Since Go 1.27, `httptest.NewTestServer`: a server and client that talk without a socket or a port, so a bubble can move its clock across an HTTP call | 08-08 |
+| **page cache** | The kernel's copy of file data in memory. A write returns once the bytes are there, not on the disk: they survive a `kill -9`, not a power cut | 10-03 |
+| **`fsync`** (`File.Sync`) | The system call that returns once the file's data are on the disk. About a millisecond here, whatever it carries, so batching writes per sync is what makes it affordable (`labs/fsync`) | 10-03 |
+| **directory sync** | A new file's name lives in its directory: it is durable only after a `Sync` of the directory too, as `journal.Open` does | 10-03 |
+| **torn write** | A write a crash cut in the middle, leaving part of a record or bytes the disk never got. The journal's CRC finds it, and `Open` drops it when it is the last line | 10-06 |
+| **`signal.NotifyContext`** | A context canceled when the process gets one of the given signals. While it is in place the signal does not end the process; `stop` gives the default back | 10-08 |
+| **`context.WithoutCancel`** | A context with the values of its parent and none of its cancellation: the calls in flight finish after a stop | 10-08 |
 
 ## Infrastructure
 
@@ -117,3 +128,4 @@ the lessons use the Portuguese word in parentheses.
 | **`forbidigo`** | The linter that forbids identifiers, such as `time.Now` in the domain | 03-05 |
 | **`num_ctx`** | The Ollama request option that sets the model's context in tokens. `all-minilm` gets 256 unless asked, out of the 512 it supports; Garimpo sends 512 | 08-04 |
 | **`truncate`** | The `/api/embed` field that cuts an input over the context: true by default, and silent. Garimpo always sends false, and a longer text fails with `ErrTextTooLong` (INC-08) | 08-04 |
+| **`SIGTERM`, `SIGKILL`** | The polite and the final stop. `docker stop` sends `SIGTERM`, waits 10 s and then sends `SIGKILL`, which no process can catch: nothing drains, and only what reached the journal remains | 10-08 |
