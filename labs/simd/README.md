@@ -9,7 +9,7 @@ GOEXPERIMENT=simd go test -bench . ./labs/simd
 go run ./labs/simd   # without the experiment: says what it needs
 ```
 
-Measured on 26/11/2026 (Go 1.27.4, i7-13700H, one P-core: `BENCH_CPUSET=2`, 10 runs,
+Measured on 26/11/2026 (Go 1.27.4, i7-13700H under WSL 2, one virtual CPU: `BENCH_CPUSET=2`, 10 runs,
 `benchstat`):
 
 | Version | sec/op |
