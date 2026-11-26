@@ -178,6 +178,9 @@ func settled(want int) int {
 	return n
 }
 
+// TestRunIngestionLeavesNoGoroutineBehind fails only on more goroutines after than before.
+// The count before may still hold goroutines of an earlier test that are returning, so it
+// can be a few too high; a leak in each of the ten runs adds at least ten.
 func TestRunIngestionLeavesNoGoroutineBehind(t *testing.T) {
 	before := runtime.NumGoroutine()
 	for range 10 {
@@ -188,7 +191,7 @@ func TestRunIngestionLeavesNoGoroutineBehind(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if after := settled(before); after != before {
+	if after := settled(before); after > before {
 		t.Fatalf("%d goroutines before, %d after ten failed runs", before, after)
 	}
 }
