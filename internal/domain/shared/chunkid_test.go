@@ -90,3 +90,38 @@ func TestZeroChunkID(t *testing.T) {
 		t.Errorf("String() = %q, want an empty string", got)
 	}
 }
+
+// A journal stores the ID as its String; ParseChunkID is the way back (RN02).
+func TestParseChunkIDReturnsTheIDOfItsString(t *testing.T) {
+	id, err := NewChunkID("sync/mutex.go", 0, 1, 30, "package sync")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := ParseChunkID(id.String())
+	if err != nil || got != id {
+		t.Fatalf("ParseChunkID(%q) = %s, %v; want %s", id.String(), got, err, id)
+	}
+}
+
+func TestParseChunkIDRejectsWhatStringNeverWrites(t *testing.T) {
+	id, err := NewChunkID("sync/mutex.go", 0, 1, 30, "package sync")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := id.String()
+	for _, tc := range []struct{ name, in string }{
+		{"empty", ""},
+		{"too short", s[:63]},
+		{"too long", s + "0"},
+		{"not hexadecimal", "z" + s[1:]},
+		{"upper case", "A" + s[1:]},
+		{"all zeros", "0000000000000000000000000000000000000000000000000000000000000000"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := ParseChunkID(tc.in)
+			if !errors.Is(err, ErrInvalidChunkID) || !got.IsZero() {
+				t.Fatalf("ParseChunkID(%q) = %s, %v; want the zero ChunkID and ErrInvalidChunkID", tc.in, got, err)
+			}
+		})
+	}
+}
