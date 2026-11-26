@@ -20,11 +20,20 @@ func dot(a, b []float32) float32 {
 // are equal.
 func dotAVX2(a, b []float32) float32 {
 	b = b[:len(a)]
-	var acc archsimd.Float32x8
+	// Four registers of sums, as the scalar version has four sums: each FMA waits only for
+	// the one four back.
+	var acc0, acc1, acc2, acc3 archsimd.Float32x8
 	i := 0
-	for ; i+8 <= len(a); i += 8 {
-		acc = archsimd.LoadFloat32x8(a[i:]).MulAdd(archsimd.LoadFloat32x8(b[i:]), acc)
+	for ; i+32 <= len(a); i += 32 {
+		acc0 = archsimd.LoadFloat32x8(a[i:]).MulAdd(archsimd.LoadFloat32x8(b[i:]), acc0)
+		acc1 = archsimd.LoadFloat32x8(a[i+8:]).MulAdd(archsimd.LoadFloat32x8(b[i+8:]), acc1)
+		acc2 = archsimd.LoadFloat32x8(a[i+16:]).MulAdd(archsimd.LoadFloat32x8(b[i+16:]), acc2)
+		acc3 = archsimd.LoadFloat32x8(a[i+24:]).MulAdd(archsimd.LoadFloat32x8(b[i+24:]), acc3)
 	}
+	for ; i+8 <= len(a); i += 8 {
+		acc0 = archsimd.LoadFloat32x8(a[i:]).MulAdd(archsimd.LoadFloat32x8(b[i:]), acc0)
+	}
+	acc := acc0.Add(acc1).Add(acc2.Add(acc3))
 	var out [8]float32
 	acc.Store(out[:])
 	// What follows uses SSE instructions: with the upper half of the registers dirty, each

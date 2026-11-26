@@ -17,7 +17,7 @@ func TestSIMDAgreesWithTheScalarVersion(t *testing.T) {
 		t.Skip("this processor has no AVX2 with FMA")
 	}
 	r := rand.New(rand.NewPCG(1, 2))
-	for n := range 100 {
+	for n := range 200 {
 		for _, off := range []int{0, 1, 3} {
 			a, b := make([]float32, n+off), make([]float32, n+off)
 			var size float64
