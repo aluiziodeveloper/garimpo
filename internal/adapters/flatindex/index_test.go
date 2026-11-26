@@ -1,6 +1,7 @@
 package flatindex_test
 
 import (
+	"fmt"
 	"math/rand/v2"
 	"testing"
 
@@ -13,6 +14,16 @@ func TestIndexMeetsTheContract(t *testing.T) {
 	indextest.Contract(t, func(_ *testing.T, dim int) search.VectorIndex {
 		return flatindex.New(dim)
 	})
+}
+
+func TestShardedMeetsTheContract(t *testing.T) {
+	for _, shards := range []int{1, 3, 8} {
+		t.Run(fmt.Sprint(shards, " shards"), func(t *testing.T) {
+			indextest.Contract(t, func(_ *testing.T, dim int) search.VectorIndex {
+				return flatindex.NewSharded(dim, shards)
+			})
+		})
+	}
 }
 
 // corpus is the number of chunks of the whole corpus (module 07), and dim the dimension
