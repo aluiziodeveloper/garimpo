@@ -58,6 +58,9 @@ docker compose exec dev go run ./cmd/garimpo ingest -corpus /usr/local/go/src/er
 docker compose exec dev go test -run Ollama -v ./internal/adapters/ollama
 ```
 
+`-batch 8` gathers up to 8 chunks of concurrent workers into one request (`ollama.Batcher`):
+a batch goes out when it is full or `-batch-wait` (10 ms) after its first chunk.
+
 ## Checks
 
 The same commands run in CI on every pull request:

@@ -3,21 +3,32 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
-// fourDims answers POST /api/embed with the vector [1 2 3 4] for every input.
-func fourDims(w http.ResponseWriter, r *http.Request) {
+// fourDims answers POST /api/embed with the vector [1 2 3 4] for every input, and
+// records how many inputs each request had.
+type fourDims struct {
+	mu      sync.Mutex
+	batches []int
+}
+
+func (f *fourDims) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var req struct{ Input []string }
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	f.mu.Lock()
+	f.batches = append(f.batches, len(req.Input))
+	f.mu.Unlock()
 	embeddings := make([][]float32, len(req.Input))
 	for i := range embeddings {
 		embeddings[i] = []float32{1, 2, 3, 4}
@@ -25,9 +36,11 @@ func fourDims(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]any{"embeddings": embeddings})
 }
 
-func TestIngestEmbedsTheCorpus(t *testing.T) {
+// corpusOf writes the files to a new directory and returns it.
+func corpusOf(t *testing.T, files map[string]string) string {
+	t.Helper()
 	dir := t.TempDir()
-	for name, text := range map[string]string{"a.go": "package a\n", "b/b.go": "package b\n"} {
+	for name, text := range files {
 		p := filepath.Join(dir, filepath.FromSlash(name))
 		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 			t.Fatal(err)
@@ -36,7 +49,12 @@ func TestIngestEmbedsTheCorpus(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	srv := httptest.NewServer(http.HandlerFunc(fourDims))
+	return dir
+}
+
+func TestIngestEmbedsTheCorpus(t *testing.T) {
+	dir := corpusOf(t, map[string]string{"a.go": "package a\n", "b/b.go": "package b\n"})
+	srv := httptest.NewServer(new(fourDims))
 	defer srv.Close()
 
 	var out bytes.Buffer
@@ -46,6 +64,36 @@ func TestIngestEmbedsTheCorpus(t *testing.T) {
 	want := "completed documents=2 chunks=2 embedded=2 failed=0 pending=0 in "
 	if got := out.String(); !strings.HasPrefix(got, want) {
 		t.Errorf("ingest output = %q, want it to start with %q", got, want)
+	}
+}
+
+func TestIngestBatchesTheChunks(t *testing.T) {
+	files := make(map[string]string)
+	for i := range 12 {
+		files[fmt.Sprintf("f%02d.go", i)] = fmt.Sprintf("package f%d\n", i)
+	}
+	dir := corpusOf(t, files)
+	var f fourDims
+	srv := httptest.NewServer(&f)
+	defer srv.Close()
+
+	var out bytes.Buffer
+	args := []string{"ingest", "-corpus", dir, "-ollama", srv.URL, "-dim", "4", "-workers", "8", "-batch", "4"}
+	if err := run(args, &out); err != nil {
+		t.Fatal(err)
+	}
+	if want := "completed documents=12 chunks=12 embedded=12 "; !strings.HasPrefix(out.String(), want) {
+		t.Fatalf("ingest output = %q, want it to start with %q", out.String(), want)
+	}
+	total := 0
+	for _, n := range f.batches {
+		if n > 4 {
+			t.Errorf("a request had %d inputs, want at most 4", n)
+		}
+		total += n
+	}
+	if total != 12 || len(f.batches) == 12 {
+		t.Errorf("requests had %v inputs, want 12 in fewer than 12 requests", f.batches)
 	}
 }
 

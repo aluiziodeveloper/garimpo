@@ -77,6 +77,8 @@ func ingestCorpus(args []string, out io.Writer) error {
 	model := fl.String("model", "all-minilm:22m", "the embedding model")
 	dim := fl.Int("dim", 384, "the dimension of the model's vectors")
 	ctxTokens := fl.Int("context", 512, "the model's context in tokens; a longer chunk fails")
+	batch := fl.Int("batch", 1, "the most chunks in one request to the model; 1 sends them one by one")
+	wait := fl.Duration("batch-wait", 10*time.Millisecond, "how long a batch waits to fill up")
 	if err := fl.Parse(args); err != nil {
 		return err
 	}
@@ -88,12 +90,19 @@ func ingestCorpus(args []string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	progress := new(ingest.Progress)
-	cfg := ingest.Config{
-		Workers:  *workers,
-		Embedder: &ollama.Embedder{URL: *url, Model: *model, Dim: *dim, Context: *ctxTokens, NumThread: threads},
-		Progress: progress,
+	var embedder ingest.Embedder = &ollama.Embedder{
+		URL: *url, Model: *model, Dim: *dim, Context: *ctxTokens, NumThread: threads,
 	}
+	if *batch > 1 {
+		b, berr := ollama.NewBatcher(embedder, *batch, *wait)
+		if berr != nil {
+			return fmt.Errorf("ingest: %w", berr)
+		}
+		defer b.Close()
+		embedder = b
+	}
+	progress := new(ingest.Progress)
+	cfg := ingest.Config{Workers: *workers, Embedder: embedder, Progress: progress}
 	start := time.Now()
 	err = ingest.RunIngestion(context.Background(), run, corpus.Walk(os.DirFS(*dir)), cfg)
 	_, perr := fmt.Fprintf(out, "%s %s in %s\n", run.State(), progress.Snapshot(), time.Since(start).Round(time.Millisecond))
