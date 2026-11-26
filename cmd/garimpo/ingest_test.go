@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 
 	"github.com/aluiziodeveloper/garimpo/internal/adapters/journal"
@@ -165,5 +166,50 @@ func TestIngestResumesTheRunOfTheJournal(t *testing.T) {
 	}
 	if want := "completed already: nothing to do\n"; !strings.HasSuffix(out.String(), want) || len(f.batches) != 2 {
 		t.Fatalf("second ingest output = %q after %d requests, want it to end with %q after 2", out.String(), len(f.batches), want)
+	}
+}
+
+// sigterm answers like fourDims and, at the first request, sends SIGTERM to this process,
+// as docker stop does to the container's.
+type sigterm struct {
+	fourDims
+	once sync.Once
+}
+
+func (s *sigterm) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	s.once.Do(func() {
+		if err := syscall.Kill(os.Getpid(), syscall.SIGTERM); err != nil {
+			panic(err)
+		}
+	})
+	s.fourDims.ServeHTTP(w, r)
+}
+
+// A SIGTERM pauses the run: ingest drains, says so and returns no error, and the journal
+// lets the next ingest finish it.
+func TestIngestPausesOnSIGTERM(t *testing.T) {
+	files := make(map[string]string)
+	for i := range 50 {
+		files[fmt.Sprintf("f%02d.go", i)] = fmt.Sprintf("package f%d\n", i)
+	}
+	dir := corpusOf(t, files)
+	srv := httptest.NewServer(new(sigterm))
+	defer srv.Close()
+	path := filepath.Join(t.TempDir(), "ingest.journal")
+	args := []string{"ingest", "-corpus", dir, "-ollama", srv.URL, "-dim", "4", "-journal", path}
+
+	var out bytes.Buffer
+	if err := run(args, &out); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(out.String(), "paused ") {
+		t.Fatalf("ingest output after SIGTERM = %q, want it to start with \"paused \"", out.String())
+	}
+	out.Reset()
+	if err := run(args, &out); err != nil {
+		t.Fatal(err)
+	}
+	if !regexp.MustCompile(`^completed documents=50 chunks=\d+ embedded=\d+ failed=0 pending=0 skipped=[1-9]`).MatchString(out.String()) {
+		t.Fatalf("second ingest output = %q, want it completed, skipping what the first one did", out.String())
 	}
 }

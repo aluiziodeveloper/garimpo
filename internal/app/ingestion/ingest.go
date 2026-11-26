@@ -57,8 +57,13 @@ type change func(*domain.Run) error
 // at the same time follow the limit, not the number of workers (RN04, INC-09).
 //
 // The domain is sequential, so only the caller's goroutine touches run: the stages send
-// it changes. A read error or a canceled ctx fails the run and is returned; a chunk the
-// embedder fails is recorded and the run goes on.
+// it changes. A read error fails the run and is returned; a chunk the embedder fails is
+// recorded and the run goes on.
+//
+// Canceling ctx is a request to stop, such as a SIGTERM: no new document, chunk or call
+// starts, the calls to the embedder in flight finish and are recorded, the run pauses and
+// RunIngestion returns ctx's error. The chunks cut and not sent are cut again when the run
+// resumes. A call that never returns holds the stop: the caller decides how long to wait.
 func RunIngestion(ctx context.Context, run *domain.Run, docs iter.Seq2[domain.Document, error], cfg Config) error {
 	if cfg.Workers < 1 || cfg.Embedder == nil || cfg.MaxPending < 0 {
 		return fmt.Errorf("%w: %d workers, max pending %d, embedder set: %t",
@@ -90,16 +95,26 @@ func RunIngestion(ctx context.Context, run *domain.Run, docs iter.Seq2[domain.Do
 		handled[id] = struct{}{}
 	}
 
-	ctx, cancel := context.WithCancelCause(ctx)
+	// Two contexts. work ends only when the run fails: the calls to the model and the
+	// changes to the run use it, so a stop lets them finish. waits ends when the run fails
+	// or the caller stops it (ctx): the stages wait on it for the next document, chunk or
+	// permit, and a stop ends those waits.
+	work, cancel := context.WithCancelCause(context.WithoutCancel(ctx))
 	defer cancel(nil)
-	g, ctx := errgroup.WithContext(ctx)
+	g, work := errgroup.WithContext(work)
+	waits, endWaits := context.WithCancel(work)
+	defer endWaits()
+	stopWaits := context.AfterFunc(ctx, endWaits)
+	defer stopWaits()
+	stopped := func() bool { return ctx.Err() != nil }
+
 	changes := make(chan change)
 	send := func(c change) error {
 		select {
 		case changes <- c:
 			return nil
-		case <-ctx.Done():
-			return ctx.Err()
+		case <-work.Done():
+			return work.Err()
 		}
 	}
 
@@ -113,6 +128,9 @@ func RunIngestion(ctx context.Context, run *domain.Run, docs iter.Seq2[domain.Do
 			if err != nil {
 				return err
 			}
+			if stopped() {
+				return nil
+			}
 			cfg.Progress.DocumentRead()
 			if err := send(func(r *domain.Run) error { return r.DiscoverDocument(d) }); err != nil {
 				return err
@@ -124,14 +142,14 @@ func RunIngestion(ctx context.Context, run *domain.Run, docs iter.Seq2[domain.Do
 				}
 				select {
 				case pending <- struct{}{}: // waits while MaxPending chunks are in flight
-				case <-ctx.Done():
-					return ctx.Err()
+				case <-waits.Done():
+					return failure(work)
 				}
 				cfg.Progress.ChunksCut(1)
 				select {
 				case cut <- c:
-				case <-ctx.Done():
-					return ctx.Err()
+				case <-waits.Done():
+					return failure(work)
 				}
 			}
 		}
@@ -140,14 +158,29 @@ func RunIngestion(ctx context.Context, run *domain.Run, docs iter.Seq2[domain.Do
 
 	for range cfg.Workers { // stage 2: embed
 		g.Go(func() error {
-			for c := range cut {
-				err := embed(ctx, cfg, c, send)
+			for {
+				// A stop takes no new chunk: the ones still in cut were never sent to the
+				// model, and a resumed run cuts them again.
+				var c domain.Chunk
+				select {
+				case next, ok := <-cut:
+					if !ok {
+						return nil
+					}
+					c = next
+				case <-waits.Done():
+					return failure(work)
+				}
+				if stopped() {
+					<-pending
+					return nil
+				}
+				err := embed(work, waits, cfg, c, send)
 				<-pending // counted as embedded or failed: the slot is free
 				if err != nil {
 					return err
 				}
 			}
-			return nil
 		})
 	}
 
@@ -175,16 +208,29 @@ func RunIngestion(ctx context.Context, run *domain.Run, docs iter.Seq2[domain.Do
 	if applyErr != nil {
 		err = applyErr // the stages only saw the cancel it caused
 	}
-	if err != nil {
+	switch {
+	case err != nil:
 		if ferr := run.Fail(err.Error()); ferr != nil {
 			return errors.Join(err, ferr)
 		}
 		return errors.Join(err, cfg.Journal.Append(run.TakeEvents()))
+	case stopped():
+		// Every call in flight is recorded: pause, and the next run resumes from here.
+		if perr := run.Pause(); perr != nil {
+			return errors.Join(ctx.Err(), perr)
+		}
+		return errors.Join(ctx.Err(), cfg.Journal.Append(run.TakeEvents()))
 	}
 	if err := run.Complete(); err != nil {
 		return err
 	}
 	return cfg.Journal.Append(run.TakeEvents())
+}
+
+// failure returns why the stages must end when a wait ends: the run's error if it failed,
+// or nil if the caller stopped it.
+func failure(work context.Context) error {
+	return work.Err()
 }
 
 // discard is the Journal of a run without one: the events are dropped.
@@ -200,12 +246,15 @@ func (discard) Replay() iter.Seq2[domain.Event, error] {
 // A canceled context and a broken contract are errors of the stage; an embedder error
 // fails the chunk. Module 12 keeps the vector in an index; until then it is checked and
 // dropped.
-func embed(ctx context.Context, cfg Config, c domain.Chunk, send func(change) error) error {
+//
+// The call and the send use ctx, which ends only when the run fails; the wait for a
+// permit uses waits, which a stop ends too: a worker that has no permit yet takes none.
+func embed(ctx, waits context.Context, cfg Config, c domain.Chunk, send func(change) error) error {
 	var permit limiter.Permit
 	if cfg.Limiter != nil {
 		var err error
-		if permit, err = cfg.Limiter.Acquire(ctx); err != nil {
-			return err // only a done ctx ends the wait
+		if permit, err = cfg.Limiter.Acquire(waits); err != nil {
+			return failure(ctx) // a stop or a failure ended the wait
 		}
 	}
 	vs, err := cfg.Embedder.Embed(ctx, []string{c.Text()})

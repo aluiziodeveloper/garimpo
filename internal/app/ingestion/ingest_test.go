@@ -3,8 +3,10 @@ package ingestion
 import (
 	"context"
 	"errors"
+	"fmt"
 	"iter"
 	"runtime"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -166,7 +168,9 @@ func TestAReadErrorFailsTheRun(t *testing.T) {
 	}
 }
 
-func TestCancelingFailsTheRun(t *testing.T) {
+// Canceling ctx is a request to stop, as a SIGTERM is: the run pauses, and every call to
+// the model that was in flight finishes and is recorded, so that no answer is thrown away.
+func TestStoppingPausesTheRun(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	f := fakeEmbedder{fail: func(string) error { cancel(); return nil }}
 	var events recorded
@@ -180,8 +184,103 @@ func TestCancelingFailsTheRun(t *testing.T) {
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("err = %v, want context.Canceled", err)
 	}
-	if run.State() != domain.Failed {
-		t.Fatalf("run is %s, want failed", run.State())
+	if run.State() != domain.Paused || events[len(events)-1] != (domain.RunPaused{Run: "run-1"}) {
+		t.Fatalf("run is %s, last event %+v; want paused and RunPaused", run.State(), events[len(events)-1])
+	}
+	confirmed := 0
+	for _, e := range events {
+		if _, ok := e.(domain.ChunkEmbedded); ok {
+			confirmed++
+		}
+	}
+	if confirmed != f.total || confirmed == 0 || confirmed == len(texts) {
+		t.Fatalf("%d calls answered, %d chunks confirmed; want them equal, above 0 and below %d", f.total, confirmed, len(texts))
+	}
+}
+
+// blockingEmbedder holds every call until release is closed, and says if a call saw its
+// context done.
+type blockingEmbedder struct {
+	started  chan struct{} // gets a value when a call begins
+	release  chan struct{}
+	mu       sync.Mutex
+	canceled int
+}
+
+func (b *blockingEmbedder) Embed(ctx context.Context, texts []string) ([]shared.Vector, error) {
+	b.started <- struct{}{}
+	<-b.release
+	if ctx.Err() != nil {
+		b.mu.Lock()
+		b.canceled++
+		b.mu.Unlock()
+		return nil, ctx.Err()
+	}
+	return slices.Repeat([]shared.Vector{oneVector}, len(texts)), nil
+}
+
+// The stop does not cancel the calls in flight: they finish with their context alive.
+func TestAStopLetsTheCallsInFlightFinish(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	b := &blockingEmbedder{started: make(chan struct{}, 3), release: make(chan struct{})}
+	var events recorded
+	run, cfg := setup(t, nil, &events)
+	cfg.Embedder = b
+	done := make(chan error)
+	go func() { done <- RunIngestion(ctx, run, documents(t, nil, "aaaa\n", "bbbb\n", "cccc\n", "dddd\n"), cfg) }()
+	for range 3 { // the three workers are in a call each
+		<-b.started
+	}
+	cancel()
+	close(b.release)
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
+	}
+	confirmed := 0
+	for _, e := range events {
+		if _, ok := e.(domain.ChunkEmbedded); ok {
+			confirmed++
+		}
+	}
+	if b.canceled != 0 || confirmed != 3 || events[len(events)-1] != (domain.RunPaused{Run: "run-1"}) {
+		t.Fatalf("%d calls saw a canceled context, %d chunks confirmed, last event %+v; want none, 3 and RunPaused",
+			b.canceled, confirmed, events[len(events)-1])
+	}
+}
+
+// A stopped run resumes where it paused: every chunk is embedded once, across the runs.
+func TestAStoppedRunResumes(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	calls := 0
+	f := fakeEmbedder{fail: func(string) error {
+		if calls++; calls == 5 {
+			cancel()
+		}
+		return nil
+	}}
+	var j recorded
+	run, cfg := setup(t, &f, &j)
+	texts := make([]string, 20)
+	for i := range texts {
+		texts[i] = fmt.Sprintf("%04d\n", i)
+	}
+	if err := RunIngestion(ctx, run, documents(t, nil, texts...), cfg); !errors.Is(err, context.Canceled) {
+		t.Fatalf("first run: err = %v, want context.Canceled", err)
+	}
+	again, err := OpenRun(&j, "run-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := RunIngestion(t.Context(), again, documents(t, nil, texts...), cfg); err != nil {
+		t.Fatal(err)
+	}
+	for text, n := range f.seen {
+		if n != 1 {
+			t.Errorf("chunk %q embedded %d times across the two runs", text, n)
+		}
+	}
+	if len(f.seen) != len(texts) || again.State() != domain.Completed {
+		t.Fatalf("%d chunks embedded, run %s; want %d and completed", len(f.seen), again.State(), len(texts))
 	}
 }
 
