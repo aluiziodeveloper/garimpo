@@ -65,8 +65,10 @@ func TestRetryStopsWhenTheContextEnds(t *testing.T) {
 }
 
 // TestWaitShowsWhereTheGoroutineIs uses synctest.Wait to look at a retry in the middle:
-// Wait returns once every other goroutine of the bubble is durably blocked. Wait says
-// nothing about memory, so the count is atomic: with a plain int, -race reports a race.
+// Wait returns once every other goroutine of the bubble is durably blocked, and what they
+// did before blocking happens before it returns. The fake clock moving orders nothing: the
+// read after the first Wait and the call the timer wakes up race on a plain int, so the
+// count is atomic.
 func TestWaitShowsWhereTheGoroutineIs(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		var calls atomic.Int64

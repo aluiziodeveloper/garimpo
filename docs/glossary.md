@@ -45,6 +45,9 @@ the lessons use the Portuguese word in parentheses.
 | **aggregate** | A cluster of objects changed only through one root, which checks the invariants and the state machine: `ingestion.Run`, the `IngestionRun`. One goroutine owns it | 07-01 |
 | **domain event** | Something that happened to an aggregate, in the past tense (`ChunkEmbedded`), recorded by each accepted command and handed out with `TakeEvents`; module 10 writes them to the journal | 07-03 |
 | **fuzzing** | A property test whose inputs Go generates and mutates, guided by coverage (`go test -fuzz`). A failing input is saved under `testdata/fuzz` and runs as a test from then on | 06-08 |
+| **contract test** | One suite every implementation of a port must pass, such as `embeddertest.Contract` for the fake, the Ollama adapter, the `Batcher` and a real Ollama. It lives outside the port's package, so the port's own tests do not import it back | 08-02 |
+| **decorator** | A type that implements a port by wrapping another implementation of it and adding a behavior, such as the `Batcher` in front of the Ollama `Embedder` | 08-07 |
+| **micro-batching** | Gathering the calls of concurrent callers into one request, sent when it is full or a short wait after its first call, whichever comes first. It pays when a request costs more than its work (lesson 08-09) | 08-07 |
 
 ## Go and runtime
 
@@ -91,6 +94,10 @@ the lessons use the Portuguese word in parentheses.
 | **`errgroup`** | `golang.org/x/sync/errgroup`: goroutines whose first error cancels the group's context and is the one `Wait` returns. `Wait` waits for all of them, so a stage that never returns hangs the group | 07-05 |
 | **backpressure** | A slow stage making the fast one before it wait, through a bounded channel, instead of letting the work pile up in memory (INC-07) | 07-08 |
 | **peak live heap** | The largest heap the garbage collector found alive during a run, sampled from `/gc/heap/live:bytes` (`runtime/metrics`) | 06-10 |
+| **`synctest` bubble** | The goroutines started inside `synctest.Test`, with a fake clock of their own, starting at 2000-01-01, that moves only when all of them are durably blocked | 08-05 |
+| **durably blocked** | A goroutine of a bubble blocked on something only the bubble can wake: a channel made in the bubble, `sync.WaitGroup.Wait`, `sync.Cond.Wait`, `time.Sleep`. A `sync.Mutex` and a real socket are not | 08-05 |
+| **`synctest.Wait`** | Waits until every other goroutine of the bubble is durably blocked; what they did before blocking happens before it returns. The fake clock moving orders nothing: a read before it and a write it wakes up race (lesson 08-06) | 08-06 |
+| **in-memory network** | Since Go 1.27, `httptest.NewTestServer`: a server and client that talk without a socket or a port, so a bubble can move its clock across an HTTP call | 08-08 |
 
 ## Infrastructure
 
@@ -101,3 +108,5 @@ the lessons use the Portuguese word in parentheses.
 | **squash merge** | Merging a pull request as one commit, with the pull request title as its message | 01-05 |
 | **`depguard`** | The linter that checks which packages each layer may import (`.golangci.yml`) | 03-05 |
 | **`forbidigo`** | The linter that forbids identifiers, such as `time.Now` in the domain | 03-05 |
+| **`num_ctx`** | The Ollama request option that sets the model's context in tokens. `all-minilm` gets 256 unless asked, out of the 512 it supports; Garimpo sends 512 | 08-04 |
+| **`truncate`** | The `/api/embed` field that cuts an input over the context: true by default, and silent. Garimpo always sends false, and a longer text fails with `ErrTextTooLong` (INC-08) | 08-04 |
