@@ -8,8 +8,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"runtime"
 	"strconv"
+	"syscall"
 	"time"
 
 	"github.com/aluiziodeveloper/garimpo/internal/adapters/corpus"
@@ -128,12 +130,23 @@ func ingestCorpus(args []string, out io.Writer) error {
 		}
 		cfg.Limiter = l
 	}
+	// SIGINT (Ctrl+C) and SIGTERM (docker stop, kill) stop the run: it drains and pauses.
+	// After the first signal, the default comes back, and a second one ends the process.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	context.AfterFunc(ctx, stop)
+	note := ""
 	start := time.Now()
-	err = ingest.RunIngestion(context.Background(), run, corpus.Walk(os.DirFS(*dir)), cfg)
-	limit := ""
-	if cfg.Limiter != nil {
-		limit = fmt.Sprintf(" (adaptive limit %d of %d)", cfg.Limiter.Limit(), *workers)
+	err = ingest.RunIngestion(ctx, run, corpus.Walk(os.DirFS(*dir)), cfg)
+	if run.State() == ingestion.Paused && ctx.Err() != nil {
+		err = nil // a stop by request: the run paused and its journal resumes it
+		if j == nil {
+			note += " (no -journal: the next run starts over)"
+		}
 	}
-	_, perr := fmt.Fprintf(out, "%s %s in %s%s\n", run.State(), progress.Snapshot(), time.Since(start).Round(time.Millisecond), limit)
+	if cfg.Limiter != nil {
+		note = fmt.Sprintf(" (adaptive limit %d of %d)", cfg.Limiter.Limit(), *workers) + note
+	}
+	_, perr := fmt.Fprintf(out, "%s %s in %s%s\n", run.State(), progress.Snapshot(), time.Since(start).Round(time.Millisecond), note)
 	return errors.Join(err, perr)
 }
