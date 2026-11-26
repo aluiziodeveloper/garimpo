@@ -1,6 +1,9 @@
 // Package vec holds the arithmetic of the vectors Garimpo searches with: the dot product,
 // called once for every vector of the index in every search. It has no business rules and
 // imports only the standard library, so any layer may use it.
+//
+// Built with GOEXPERIMENT=simd on amd64, Dot uses the AVX2 instructions when the processor
+// has them (dot_simd.go); otherwise, the scalar version (dot_other.go).
 package vec
 
 import "fmt"
@@ -10,6 +13,13 @@ func Dot(a, b []float32) float32 {
 	if len(a) != len(b) {
 		panic(fmt.Sprintf("vec.Dot: lengths %d and %d", len(a), len(b)))
 	}
+	return dot(a, b)
+}
+
+// dotScalar is the dot product one float32 at a time, for any processor. The caller has
+// checked that the lengths are equal.
+func dotScalar(a, b []float32) float32 {
+	b = b[:len(a)]
 	// Four sums instead of one: each addition waits only for the one four products back,
 	// so the processor runs four at a time. The order of the additions changes, and so
 	// does the rounding, within the error a float32 sum has anyway.

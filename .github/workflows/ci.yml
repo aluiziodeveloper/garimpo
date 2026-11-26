@@ -49,6 +49,11 @@ jobs:
         run: go test -race -count=1 ./...
         env:
           GOEXPERIMENT: simd
+      # The SIMD tests skip on a runner without AVX2 and FMA: -v shows PASS or SKIP in the log.
+      - name: SIMD paths (GOEXPERIMENT=simd)
+        run: go test -count=1 -v -run 'SIMD|EveryVersion' ./internal/vec ./labs/simd
+        env:
+          GOEXPERIMENT: simd
 
   build:
     name: Build
