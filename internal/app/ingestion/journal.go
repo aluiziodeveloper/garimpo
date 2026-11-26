@@ -1,6 +1,7 @@
 package ingestion
 
 import (
+	"fmt"
 	"iter"
 
 	domain "github.com/aluiziodeveloper/garimpo/internal/domain/ingestion"
@@ -20,4 +21,33 @@ import (
 type Journal interface {
 	Append(events []domain.Event) error
 	Replay() iter.Seq2[domain.Event, error]
+}
+
+// OpenRun returns the run of the journal j: a new pending run with the ID id when j is
+// empty, or the run its events rebuild. A run that was running when its process died is
+// paused, and the pause is appended to j: RunIngestion resumes a paused run.
+func OpenRun(j Journal, id string) (*domain.Run, error) {
+	var events []domain.Event
+	for e, err := range j.Replay() {
+		if err != nil {
+			return nil, err
+		}
+		events = append(events, e)
+	}
+	if len(events) == 0 {
+		return domain.NewRun(id)
+	}
+	run, err := domain.RestoreRun(events)
+	if err != nil {
+		return nil, fmt.Errorf("restore the run of the journal: %w", err)
+	}
+	if run.State() == domain.Running {
+		if err := run.Pause(); err != nil {
+			return nil, err
+		}
+		if err := j.Append(run.TakeEvents()); err != nil {
+			return nil, err
+		}
+	}
+	return run, nil
 }

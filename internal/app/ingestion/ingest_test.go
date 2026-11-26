@@ -45,9 +45,28 @@ func (f *fakeEmbedder) Embed(_ context.Context, texts []string) ([]shared.Vector
 	return vs, nil
 }
 
+// recorded is a Journal in memory for these tests: journaltest.Memory imports this
+// package, and a test of this package cannot import it back.
+type recorded []domain.Event
+
+func (r *recorded) Append(events []domain.Event) error {
+	*r = append(*r, events...)
+	return nil
+}
+
+func (r *recorded) Replay() iter.Seq2[domain.Event, error] {
+	return func(yield func(domain.Event, error) bool) {
+		for _, e := range *r {
+			if !yield(e, nil) {
+				return
+			}
+		}
+	}
+}
+
 // setup returns a pending run and a configuration that cuts with a 10-byte window, embeds
 // with f on 3 workers and keeps every event in events.
-func setup(t *testing.T, f *fakeEmbedder, events *[]domain.Event) (*domain.Run, Config) {
+func setup(t *testing.T, f *fakeEmbedder, events *recorded) (*domain.Run, Config) {
 	t.Helper()
 	run, err := domain.NewRun("run-1")
 	if err != nil {
@@ -62,13 +81,13 @@ func setup(t *testing.T, f *fakeEmbedder, events *[]domain.Event) (*domain.Run, 
 		Workers:  3,
 		Embedder: f,
 		Progress: new(Progress),
-		Record:   func(e []domain.Event) { *events = append(*events, e...) },
+		Journal:  events,
 	}
 }
 
 func TestRunIngestionEmbedsEveryChunkOnce(t *testing.T) {
 	var f fakeEmbedder
-	var events []domain.Event
+	var events recorded
 	run, cfg := setup(t, &f, &events)
 	docs := documents(t, nil, "aaaa\nbbbb\ncccc\n", "", "dd\n")
 
@@ -111,7 +130,7 @@ func TestAFailedChunkDoesNotStopTheRun(t *testing.T) {
 		}
 		return nil
 	}}
-	var events []domain.Event
+	var events recorded
 	run, cfg := setup(t, &f, &events)
 
 	if err := RunIngestion(t.Context(), run, documents(t, nil, "aaaa\n", "bbbb\n"), cfg); err != nil {
@@ -132,7 +151,7 @@ var errDisk = errors.New("disk gone")
 
 func TestAReadErrorFailsTheRun(t *testing.T) {
 	var f fakeEmbedder
-	var events []domain.Event
+	var events recorded
 	run, cfg := setup(t, &f, &events)
 
 	err := RunIngestion(t.Context(), run, documents(t, errDisk, "aaaa\n"), cfg)
@@ -150,7 +169,7 @@ func TestAReadErrorFailsTheRun(t *testing.T) {
 func TestCancelingFailsTheRun(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	f := fakeEmbedder{fail: func(string) error { cancel(); return nil }}
-	var events []domain.Event
+	var events recorded
 	run, cfg := setup(t, &f, &events)
 	texts := make([]string, 100)
 	for i := range texts {
@@ -185,7 +204,7 @@ func TestRunIngestionLeavesNoGoroutineBehind(t *testing.T) {
 	before := runtime.NumGoroutine()
 	for range 10 {
 		var f fakeEmbedder
-		var events []domain.Event
+		var events recorded
 		run, cfg := setup(t, &f, &events)
 		if err := RunIngestion(t.Context(), run, documents(t, errDisk, "aaaa\n", "bbbb\n"), cfg); !errors.Is(err, errDisk) {
 			t.Fatal(err)
@@ -198,7 +217,7 @@ func TestRunIngestionLeavesNoGoroutineBehind(t *testing.T) {
 
 func TestRunIngestionNeedsAWorkerAndAnEmbedder(t *testing.T) {
 	var f fakeEmbedder
-	var events []domain.Event
+	var events recorded
 	for _, broken := range []func(*Config){
 		func(c *Config) { c.Workers = 0 },
 		func(c *Config) { c.Embedder = nil },
@@ -234,7 +253,7 @@ func TestRunIngestionNeverHoldsMoreThanMaxPending(t *testing.T) {
 		time.Sleep(time.Millisecond) // a slow model: the cutter gets ahead
 		return nil
 	}}
-	var events []domain.Event
+	var events recorded
 	run, cfg := setup(t, &f, &events)
 	cfg.Workers, cfg.MaxPending = 2, 8
 
@@ -251,7 +270,7 @@ func TestRunIngestionNeverHoldsMoreThanMaxPending(t *testing.T) {
 
 func TestAMaxPendingOfOneStillCompletes(t *testing.T) {
 	var f fakeEmbedder
-	var events []domain.Event
+	var events recorded
 	run, cfg := setup(t, &f, &events)
 	cfg.MaxPending = 1
 
@@ -265,7 +284,7 @@ func TestAMaxPendingOfOneStillCompletes(t *testing.T) {
 
 func TestANegativeMaxPendingIsRejected(t *testing.T) {
 	var f fakeEmbedder
-	var events []domain.Event
+	var events recorded
 	run, cfg := setup(t, &f, &events)
 	cfg.MaxPending = -1
 	if err := RunIngestion(t.Context(), run, oneLiners(t, 1), cfg); !errors.Is(err, ErrInvalidConfig) {
@@ -279,7 +298,7 @@ type lossyEmbedder struct{}
 func (lossyEmbedder) Embed(context.Context, []string) ([]shared.Vector, error) { return nil, nil }
 
 func TestAnEmbedderThatBreaksItsContractFailsTheRun(t *testing.T) {
-	var events []domain.Event
+	var events recorded
 	run, cfg := setup(t, new(fakeEmbedder), &events)
 	cfg.Embedder = lossyEmbedder{}
 
@@ -298,7 +317,7 @@ func TestTheLimiterBoundsTheCallsToTheEmbedder(t *testing.T) {
 	var mu sync.Mutex
 	var now, most int
 	f := fakeEmbedder{}
-	var events []domain.Event
+	var events recorded
 	run, cfg := setup(t, &f, &events)
 	cfg.Workers = 8
 	cfg.Embedder = embedderFunc(func(ctx context.Context, texts []string) ([]shared.Vector, error) {
@@ -333,7 +352,7 @@ func TestTheLimiterBoundsTheCallsToTheEmbedder(t *testing.T) {
 // fast, and its latency would make the model look faster than it is.
 func TestAFailedChunkGivesItsPermitBack(t *testing.T) {
 	f := fakeEmbedder{fail: func(string) error { return errModel }}
-	var events []domain.Event
+	var events recorded
 	run, cfg := setup(t, &f, &events)
 	l, err := limiter.New(limiter.Config{Max: 4, Initial: 3})
 	if err != nil {

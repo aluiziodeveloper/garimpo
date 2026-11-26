@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/aluiziodeveloper/garimpo/internal/adapters/corpus"
+	"github.com/aluiziodeveloper/garimpo/internal/adapters/journal"
 	"github.com/aluiziodeveloper/garimpo/internal/adapters/ollama"
 	ingest "github.com/aluiziodeveloper/garimpo/internal/app/ingestion"
 	"github.com/aluiziodeveloper/garimpo/internal/app/limiter"
@@ -81,6 +82,7 @@ func ingestCorpus(args []string, out io.Writer) error {
 	batch := fl.Int("batch", 1, "the most chunks in one request to the model; 1 sends them one by one")
 	wait := fl.Duration("batch-wait", 10*time.Millisecond, "how long a batch waits to fill up")
 	adaptive := fl.Bool("adaptive", false, "move the calls to the model at the same time with their latency, up to -workers (RN04)")
+	journalPath := fl.String("journal", "", "the file of the run's events; a run stopped midway resumes from it (RN02)")
 	if err := fl.Parse(args); err != nil {
 		return err
 	}
@@ -88,8 +90,22 @@ func ingestCorpus(args []string, out io.Writer) error {
 		return errors.New("ingest: no Ollama: set GARIMPO_OLLAMA_URL or -ollama")
 	}
 	threads, _ := strconv.Atoi(os.Getenv("GARIMPO_OLLAMA_NUM_THREAD")) // empty: Ollama decides
+	var j ingest.Journal
 	run, err := ingestion.NewRun("ingest")
+	if *journalPath != "" {
+		f, jerr := journal.Open(*journalPath)
+		if jerr != nil {
+			return fmt.Errorf("ingest: %w", jerr)
+		}
+		defer func() { _ = f.Close() }() // Append synced every event: a failed Close loses none
+		j = f
+		run, err = ingest.OpenRun(f, "ingest")
+	}
 	if err != nil {
+		return fmt.Errorf("ingest: %w", err)
+	}
+	if run.State() == ingestion.Completed {
+		_, err = fmt.Fprintf(out, "the run in %s is completed already: nothing to do\n", *journalPath)
 		return err
 	}
 	var embedder ingest.Embedder = &ollama.Embedder{
@@ -104,7 +120,7 @@ func ingestCorpus(args []string, out io.Writer) error {
 		embedder = b
 	}
 	progress := new(ingest.Progress)
-	cfg := ingest.Config{Workers: *workers, Embedder: embedder, Progress: progress}
+	cfg := ingest.Config{Workers: *workers, Embedder: embedder, Progress: progress, Journal: j}
 	if *adaptive {
 		l, lerr := limiter.New(limiter.Config{Max: *workers})
 		if lerr != nil {
