@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"math"
 	"slices"
+
+	"github.com/aluiziodeveloper/garimpo/internal/vec"
 )
 
 // ErrInvalidVector is wrapped by every error NewVector returns.
@@ -68,9 +70,5 @@ func (v Vector) Dot(w Vector) float32 {
 	if len(v.v) != len(w.v) {
 		panic(fmt.Sprintf("shared.Vector.Dot: dimensions %d and %d", len(v.v), len(w.v)))
 	}
-	var s float32
-	for i, x := range v.v {
-		s += x * w.v[i]
-	}
-	return s
+	return vec.Dot(v.v, w.v)
 }
