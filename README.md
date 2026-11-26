@@ -79,6 +79,19 @@ when the model is already busy with the requests it has.
 docker compose run --rm bench go test -run '^$' -bench Batch -benchtime 1x -count 6 ./internal/adapters/ollama
 ```
 
+`-adaptive` puts an adaptive limiter (`internal/app/limiter`) in front of the model: the calls
+at the same time start at 1 and follow their latency, up to `-workers` (RN04). On the CPU,
+more calls only make a queue in front of the model, and the runs on `encoding/json` ended
+with a limit of 1 or 2:
+
+```bash
+docker compose exec dev go run ./cmd/garimpo ingest -corpus /usr/local/go/src/encoding/json -workers 16 -adaptive
+```
+
+```
+completed documents=48 chunks=1038 embedded=1038 failed=0 pending=0 in 32.162s (adaptive limit 2 of 16)
+```
+
 ## Checks
 
 The same commands run in CI on every pull request:

@@ -8,6 +8,7 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	"github.com/aluiziodeveloper/garimpo/internal/app/limiter"
 	domain "github.com/aluiziodeveloper/garimpo/internal/domain/ingestion"
 )
 
@@ -25,8 +26,12 @@ type Config struct {
 	// MaxPending is the most chunks cut and not yet embedded or failed (RN03): when it is
 	// reached, the cutter waits for the embedder. Zero means DefaultMaxPending.
 	MaxPending int
-	Progress   *Progress            // optional: counted as the run goes
-	Record     func([]domain.Event) // optional: gets the run's events as they happen
+	// Limiter, when set, bounds the calls to the embedder at the same time and moves the
+	// bound with their latency (RN04). Workers still bounds them: a limit over Workers has
+	// no effect.
+	Limiter  *limiter.Limiter
+	Progress *Progress            // optional: counted as the run goes
+	Record   func([]domain.Event) // optional: gets the run's events as they happen
 }
 
 // change is something a stage asks the run's owner to apply to the run.
@@ -42,6 +47,9 @@ type change func(*domain.Run) error
 // A chunk takes a slot of pending before it is counted as cut, and gives it back once it
 // is counted as embedded or failed: a slow embedder stops the cutter, and the corpus is
 // never held in memory (RN03, INC-07).
+//
+// With cfg.Limiter, a worker takes a permit before each call to the embedder: the calls
+// at the same time follow the limit, not the number of workers (RN04, INC-09).
 //
 // The domain is sequential, so only the caller's goroutine touches run: the stages send
 // it changes. A read error or a canceled ctx fails the run and is returned; a chunk the
@@ -162,7 +170,21 @@ func RunIngestion(ctx context.Context, run *domain.Run, docs iter.Seq2[domain.Do
 // fails the chunk. Module 12 keeps the vector in an index; until then it is checked and
 // dropped.
 func embed(ctx context.Context, cfg Config, c domain.Chunk, send func(change) error) error {
+	var permit limiter.Permit
+	if cfg.Limiter != nil {
+		var err error
+		if permit, err = cfg.Limiter.Acquire(ctx); err != nil {
+			return err // only a done ctx ends the wait
+		}
+	}
 	vs, err := cfg.Embedder.Embed(ctx, []string{c.Text()})
+	if cfg.Limiter != nil {
+		if err != nil || ctx.Err() != nil {
+			permit.Discard() // a failure says nothing about the model's queue
+		} else {
+			permit.Done()
+		}
+	}
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}

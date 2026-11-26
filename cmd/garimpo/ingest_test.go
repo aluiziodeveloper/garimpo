@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -94,6 +95,29 @@ func TestIngestBatchesTheChunks(t *testing.T) {
 	}
 	if total != 12 || len(f.batches) == 12 {
 		t.Errorf("requests had %v inputs, want 12 in fewer than 12 requests", f.batches)
+	}
+}
+
+func TestIngestLimitsTheCallsAdaptively(t *testing.T) {
+	files := make(map[string]string)
+	for i := range 12 {
+		files[fmt.Sprintf("f%02d.go", i)] = fmt.Sprintf("package f%d\n", i)
+	}
+	dir := corpusOf(t, files)
+	srv := httptest.NewServer(new(fourDims))
+	defer srv.Close()
+
+	var out bytes.Buffer
+	args := []string{"ingest", "-corpus", dir, "-ollama", srv.URL, "-dim", "4", "-workers", "8", "-adaptive"}
+	if err := run(args, &out); err != nil {
+		t.Fatal(err)
+	}
+	got := out.String()
+	if want := "completed documents=12 chunks=12 embedded=12 "; !strings.HasPrefix(got, want) {
+		t.Fatalf("ingest output = %q, want it to start with %q", got, want)
+	}
+	if !regexp.MustCompile(`in \S+ \(adaptive limit [1-8] of 8\)\n$`).MatchString(got) {
+		t.Fatalf("ingest output = %q, want it to end with the adaptive limit, of 8", got)
 	}
 }
 
