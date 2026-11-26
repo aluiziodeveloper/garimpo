@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/aluiziodeveloper/garimpo/internal/app/ingestion"
 	"github.com/aluiziodeveloper/garimpo/internal/app/ingestion/embeddertest"
@@ -26,9 +27,17 @@ const fakeContext = 64
 // silence, unless the request says "truncate": false; then it fails the request. It
 // keeps the last request. Set reply to change the answer.
 type fakeOllama struct {
-	mu    sync.Mutex
-	last  map[string]any
-	reply func(w http.ResponseWriter, input []string)
+	mu       sync.Mutex
+	last     map[string]any
+	arrivals []arrival
+	reply    func(w http.ResponseWriter, r *http.Request, input []string)
+}
+
+// arrival is when a request reached the fake, on the clock of the test, and how many
+// inputs it had.
+type arrival struct {
+	at     time.Time
+	inputs int
 }
 
 func (f *fakeOllama) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -41,16 +50,17 @@ func (f *fakeOllama) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"bad json"}`, http.StatusBadRequest)
 		return
 	}
-	f.mu.Lock()
-	f.last = req
-	reply := f.reply
-	f.mu.Unlock()
 	var input []string
 	for _, x := range req["input"].([]any) {
 		input = append(input, x.(string))
 	}
+	f.mu.Lock()
+	f.last = req
+	f.arrivals = append(f.arrivals, arrival{time.Now(), len(input)})
+	reply := f.reply
+	f.mu.Unlock()
 	if reply != nil {
-		reply(w, input)
+		reply(w, r, input)
 		return
 	}
 	embeddings := make([][]float32, len(input))
@@ -70,13 +80,15 @@ func (f *fakeOllama) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]any{"model": req["model"], "embeddings": embeddings})
 }
 
-// newEmbedder returns an Embedder that talks to f on a local test server.
+// newEmbedder returns an Embedder that talks to f over the in-memory network of
+// httptest.NewTestServer (Go 1.27): no port, no socket, and it works inside a synctest
+// bubble. Its client sends every request to f, whatever the host, so the URL is the one
+// of the dev container. The server shuts down when the test ends.
 func newEmbedder(t *testing.T, f *fakeOllama) *Embedder {
 	t.Helper()
-	srv := httptest.NewServer(f)
-	t.Cleanup(srv.Close)
+	srv := httptest.NewTestServer(t, f)
 	return &Embedder{
-		URL: srv.URL, Model: "all-minilm:22m", Dim: fakeDim, Context: 512, NumThread: 4,
+		URL: "http://ollama:11434", Model: "all-minilm:22m", Dim: fakeDim, Context: 512, NumThread: 4,
 		Client: srv.Client(),
 	}
 }
@@ -103,7 +115,7 @@ func TestEmbedSpeaksOllamasAPI(t *testing.T) {
 }
 
 func TestAnOllamaErrorIsReturned(t *testing.T) {
-	f := fakeOllama{reply: func(w http.ResponseWriter, _ []string) {
+	f := fakeOllama{reply: func(w http.ResponseWriter, _ *http.Request, _ []string) {
 		w.WriteHeader(http.StatusNotFound)
 		_, _ = w.Write([]byte(`{"error":"model \"all-minilm:22m\" not found, try pulling it first"}`))
 	}}
@@ -114,7 +126,7 @@ func TestAnOllamaErrorIsReturned(t *testing.T) {
 }
 
 func TestAVectorOfAnotherDimensionIsRejected(t *testing.T) {
-	f := fakeOllama{reply: func(w http.ResponseWriter, _ []string) {
+	f := fakeOllama{reply: func(w http.ResponseWriter, _ *http.Request, _ []string) {
 		_, _ = w.Write([]byte(`{"embeddings":[[1,2,3]]}`))
 	}}
 	_, err := newEmbedder(t, &f).Embed(t.Context(), []string{"a"})
@@ -124,7 +136,7 @@ func TestAVectorOfAnotherDimensionIsRejected(t *testing.T) {
 }
 
 func TestAMissingVectorIsAnError(t *testing.T) {
-	f := fakeOllama{reply: func(w http.ResponseWriter, _ []string) {
+	f := fakeOllama{reply: func(w http.ResponseWriter, _ *http.Request, _ []string) {
 		_, _ = w.Write([]byte(`{"embeddings":[[1,2,3,4]]}`))
 	}}
 	_, err := newEmbedder(t, &f).Embed(t.Context(), []string{"a", "b"})
