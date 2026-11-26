@@ -28,6 +28,11 @@ jobs:
         run: go tool -modfile=tools/go.mod golangci-lint fmt --diff
       - name: Lint
         run: go tool -modfile=tools/go.mod golangci-lint run
+      # The SIMD code builds only with this experiment: linted, tested and built with it on.
+      - name: Lint (GOEXPERIMENT=simd)
+        run: go tool -modfile=tools/go.mod golangci-lint run
+        env:
+          GOEXPERIMENT: simd
 
   test:
     name: Tests (race)
@@ -40,6 +45,10 @@ jobs:
           cache: false
       - name: Test with the race detector
         run: go test -race -count=1 ./...
+      - name: Test with the race detector (GOEXPERIMENT=simd)
+        run: go test -race -count=1 ./...
+        env:
+          GOEXPERIMENT: simd
 
   build:
     name: Build
@@ -52,3 +61,7 @@ jobs:
           cache: false
       - name: Build
         run: go build ./...
+      - name: Build (GOEXPERIMENT=simd)
+        run: go build ./...
+        env:
+          GOEXPERIMENT: simd
