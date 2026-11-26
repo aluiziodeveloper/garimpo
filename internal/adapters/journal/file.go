@@ -29,7 +29,8 @@ var table = crc32.MakeTable(crc32.Castagnoli)
 //	3f1c09a2 {"type":"ChunkEmbedded","run":"ingest","chunk":"9b0e..."}
 //
 // Append writes all its events with one write and then calls Sync, which waits for the
-// disk: when it returns, the events survive a crash of the process and of the machine.
+// disk: when it returns, the events survive a crash of the process, and a crash of the
+// machine too if the disk keeps what a sync promises (INC-10: the tests kill the process).
 // A crash in the middle of an append can leave the last line cut, or with bytes the disk
 // never got; Open drops that line, whose events Append never confirmed.
 type File struct {

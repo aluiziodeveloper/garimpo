@@ -24,7 +24,7 @@ docker compose exec dev go test -race -count=1 -v ./labs/fsync
 --- PASS: TestTheFileHoldsEveryRecord (0.01s)
 ```
 
-On the `dev` container, whose `/tmp` is on the ext4 disk of WSL 2:
+On the `dev` container, whose `/tmp` is an overlay on the ext4 disk of WSL 2:
 
 ```bash
 docker compose exec dev go run ./labs/fsync
