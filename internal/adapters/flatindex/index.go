@@ -6,12 +6,12 @@ package flatindex
 import (
 	"context"
 	"fmt"
-	"slices"
 	"sync"
 
 	"github.com/aluiziodeveloper/garimpo/internal/app/search"
 	"github.com/aluiziodeveloper/garimpo/internal/domain/retrieval"
 	"github.com/aluiziodeveloper/garimpo/internal/domain/shared"
+	"github.com/aluiziodeveloper/garimpo/internal/topk"
 	"github.com/aluiziodeveloper/garimpo/internal/vec"
 )
 
@@ -60,8 +60,8 @@ func (x *Index) Add(id shared.ChunkID, v shared.Vector) error {
 	return nil
 }
 
-// Search returns the k vectors closest to q. It scores every vector, sorts them all and
-// keeps the first k.
+// Search returns the k vectors closest to q. It scores every vector and keeps the k best
+// in a heap (topk), without sorting them all.
 func (x *Index) Search(ctx context.Context, q shared.Vector, k int) ([]retrieval.Hit, error) {
 	switch {
 	case k < 1:
@@ -75,12 +75,15 @@ func (x *Index) Search(ctx context.Context, q shared.Vector, k int) ([]retrieval
 	query := q.Values()
 	x.mu.RLock()
 	defer x.mu.RUnlock()
-	hits := make([]retrieval.Hit, len(x.ids))
-	for i, id := range x.ids {
-		hits[i] = retrieval.Hit{Chunk: id, Score: vec.Dot(query, x.values[i*x.dim:(i+1)*x.dim])}
+	if len(x.ids) == 0 {
+		return []retrieval.Hit{}, nil
 	}
-	slices.SortFunc(hits, retrieval.Compare)
-	return slices.Clone(hits[:min(k, len(hits))]), nil
+	// A heap of k, but never larger than the index: k comes from the caller.
+	best := topk.New(min(k, len(x.ids)), retrieval.Compare)
+	for i, id := range x.ids {
+		best.Offer(retrieval.Hit{Chunk: id, Score: vec.Dot(query, x.values[i*x.dim:(i+1)*x.dim])})
+	}
+	return best.Sorted(), nil
 }
 
 // Len returns how many vectors the index keeps.
