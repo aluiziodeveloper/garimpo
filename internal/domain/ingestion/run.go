@@ -3,6 +3,8 @@ package ingestion
 import (
 	"errors"
 	"fmt"
+	"iter"
+	"maps"
 	"slices"
 	"strings"
 
@@ -59,6 +61,7 @@ type Run struct {
 	reason string
 
 	documents, embedded, failed int
+	discovered                  map[string]struct{} // by path
 	handled                     map[shared.ChunkID]struct{}
 	events                      []Event
 }
@@ -68,7 +71,7 @@ func NewRun(id string) (*Run, error) {
 	if strings.TrimSpace(id) == "" {
 		return nil, fmt.Errorf("%w: the ID is blank", ErrInvalidRun)
 	}
-	return &Run{id: id, handled: make(map[shared.ChunkID]struct{})}, nil
+	return &Run{id: id, discovered: make(map[string]struct{}), handled: make(map[shared.ChunkID]struct{})}, nil
 }
 
 // ID returns the run's ID.
@@ -113,13 +116,22 @@ func (r *Run) Fail(reason string) error {
 	return nil
 }
 
-// DiscoverDocument records a document the running run read from the corpus.
+// DiscoverDocument records a document the running run read from the corpus. A run that
+// resumes reads the corpus again: a document it discovered already is not recorded twice.
 func (r *Run) DiscoverDocument(d Document) error {
+	return r.discover(d.Path())
+}
+
+func (r *Run) discover(path string) error {
 	if err := r.require(Running); err != nil {
 		return err
 	}
+	if _, seen := r.discovered[path]; seen {
+		return nil
+	}
+	r.discovered[path] = struct{}{}
 	r.documents++
-	r.events = append(r.events, DocumentDiscovered{Run: r.id, Path: d.Path()})
+	r.events = append(r.events, DocumentDiscovered{Run: r.id, Path: path})
 	return nil
 }
 
@@ -141,6 +153,12 @@ func (r *Run) FailChunk(id shared.ChunkID, reason string) error {
 	r.failed++
 	r.events = append(r.events, ChunkFailed{Run: r.id, Chunk: id, Reason: reason})
 	return nil
+}
+
+// HandledChunks yields the chunks the run confirmed or failed, in no order: the ones a
+// resumed run skips (RN02).
+func (r *Run) HandledChunks() iter.Seq[shared.ChunkID] {
+	return maps.Keys(r.handled)
 }
 
 // TakeEvents returns the events recorded since the last call, oldest first, and forgets

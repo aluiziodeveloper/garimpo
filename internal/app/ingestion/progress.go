@@ -31,6 +31,13 @@ func (p *Progress) ChunksCut(n int) {
 	p.mu.Unlock()
 }
 
+// ChunkSkipped counts one chunk a resumed run did not embed again: the journal has it.
+func (p *Progress) ChunkSkipped() {
+	p.mu.Lock()
+	p.c.Skipped++
+	p.mu.Unlock()
+}
+
 // ChunkEmbedded counts one chunk turned into a vector.
 func (p *Progress) ChunkEmbedded() {
 	p.mu.Lock()
@@ -58,12 +65,13 @@ type Counts struct {
 	Chunks    int64
 	Embedded  int64
 	Failed    int64
+	Skipped   int64 // handled by an earlier process, in the journal; not part of Chunks
 }
 
 // Pending is how many chunks were cut and are neither embedded nor failed yet.
 func (c Counts) Pending() int64 { return c.Chunks - c.Embedded - c.Failed }
 
 func (c Counts) String() string {
-	return fmt.Sprintf("documents=%d chunks=%d embedded=%d failed=%d pending=%d",
-		c.Documents, c.Chunks, c.Embedded, c.Failed, c.Pending())
+	return fmt.Sprintf("documents=%d chunks=%d embedded=%d failed=%d pending=%d skipped=%d",
+		c.Documents, c.Chunks, c.Embedded, c.Failed, c.Pending(), c.Skipped)
 }

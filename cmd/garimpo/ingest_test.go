@@ -12,6 +12,9 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/aluiziodeveloper/garimpo/internal/adapters/journal"
+	"github.com/aluiziodeveloper/garimpo/internal/domain/ingestion"
 )
 
 // fourDims answers POST /api/embed with the vector [1 2 3 4] for every input, and
@@ -62,7 +65,7 @@ func TestIngestEmbedsTheCorpus(t *testing.T) {
 	if err := run([]string{"ingest", "-corpus", dir, "-ollama", srv.URL, "-dim", "4"}, &out); err != nil {
 		t.Fatal(err)
 	}
-	want := "completed documents=2 chunks=2 embedded=2 failed=0 pending=0 in "
+	want := "completed documents=2 chunks=2 embedded=2 failed=0 pending=0 skipped=0 in "
 	if got := out.String(); !strings.HasPrefix(got, want) {
 		t.Errorf("ingest output = %q, want it to start with %q", got, want)
 	}
@@ -126,5 +129,41 @@ func TestIngestNeedsAnOllama(t *testing.T) {
 	err := run([]string{"ingest", "-corpus", t.TempDir()}, &bytes.Buffer{})
 	if err == nil || !strings.Contains(err.Error(), "GARIMPO_OLLAMA_URL") {
 		t.Errorf("ingest without an Ollama: error = %v", err)
+	}
+}
+
+// A journal whose run started and never ended, as a process that died leaves it: ingest
+// resumes that run, and a second ingest finds it completed and calls the model no more.
+func TestIngestResumesTheRunOfTheJournal(t *testing.T) {
+	dir := corpusOf(t, map[string]string{"a.go": "package a\n", "b/b.go": "package b\n"})
+	var f fourDims
+	srv := httptest.NewServer(&f)
+	defer srv.Close()
+	path := filepath.Join(t.TempDir(), "ingest.journal")
+	j, err := journal.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = j.Append([]ingestion.Event{ingestion.RunStarted{Run: "ingest"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err = j.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	args := []string{"ingest", "-corpus", dir, "-ollama", srv.URL, "-dim", "4", "-journal", path}
+	var out bytes.Buffer
+	if err = run(args, &out); err != nil {
+		t.Fatal(err)
+	}
+	if want := "completed documents=2 chunks=2 embedded=2 "; !strings.HasPrefix(out.String(), want) {
+		t.Fatalf("ingest output = %q, want it to start with %q", out.String(), want)
+	}
+	out.Reset()
+	if err = run(args, &out); err != nil {
+		t.Fatal(err)
+	}
+	if want := "completed already: nothing to do\n"; !strings.HasSuffix(out.String(), want) || len(f.batches) != 2 {
+		t.Fatalf("second ingest output = %q after %d requests, want it to end with %q after 2", out.String(), len(f.batches), want)
 	}
 }

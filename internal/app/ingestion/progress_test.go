@@ -65,7 +65,7 @@ func TestZeroProgressIsReady(t *testing.T) {
 
 func TestCountsString(t *testing.T) {
 	c := Counts{Documents: 2, Chunks: 10, Embedded: 6, Failed: 1}
-	want := "documents=2 chunks=10 embedded=6 failed=1 pending=3"
+	want := "documents=2 chunks=10 embedded=6 failed=1 pending=3 skipped=0"
 	if got := c.String(); got != want {
 		t.Errorf("String() = %q, want %q", got, want)
 	}
