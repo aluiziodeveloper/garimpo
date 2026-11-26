@@ -6,8 +6,8 @@ and `-gcflags=-m` says what it decided; `testing.AllocsPerRun` counts what each 
 costs at run time.
 
 ```sh
-go build -gcflags=-m ./labs/escape      # the decisions
-go build -gcflags='-m -m' ./labs/escape # and why, step by step
+go build -o /dev/null -gcflags=-m ./labs/escape      # the decisions
+go build -o /dev/null -gcflags='-m -m' ./labs/escape # and why, step by step
 go run ./labs/escape                    # the allocations of each call
 go test ./labs/escape
 ```
