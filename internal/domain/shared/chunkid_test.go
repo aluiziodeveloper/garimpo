@@ -125,3 +125,21 @@ func TestParseChunkIDRejectsWhatStringNeverWrites(t *testing.T) {
 		})
 	}
 }
+
+func TestChunkIDCompareOrdersTheIDs(t *testing.T) {
+	a, _ := NewChunkID("sync/mutex.go", 0, 1, 30, "package sync")
+	b, _ := NewChunkID("sync/once.go", 0, 1, 30, "package sync")
+	same, _ := NewChunkID("sync/mutex.go", 0, 1, 30, "package sync")
+	if a.Compare(same) != 0 {
+		t.Errorf("Compare of two equal IDs = %d, want 0", a.Compare(same))
+	}
+	if a.Compare(b) == 0 || a.Compare(b) != -b.Compare(a) {
+		t.Errorf("a.Compare(b) = %d and b.Compare(a) = %d, want opposite signs", a.Compare(b), b.Compare(a))
+	}
+	if (a.Compare(b) < 0) != (a.String() < b.String()) {
+		t.Errorf("Compare and String disagree: a.Compare(b) = %d, %s and %s", a.Compare(b), a, b)
+	}
+	if (ChunkID{}).Compare(a) >= 0 {
+		t.Errorf("the zero ChunkID does not come first")
+	}
+}

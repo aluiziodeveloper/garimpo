@@ -1,6 +1,7 @@
 package shared
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -45,6 +46,14 @@ func NewChunkID(path string, offset, start, end int, text string) (ChunkID, erro
 // IsZero reports whether id is the zero ChunkID, which identifies no chunk.
 func (id ChunkID) IsZero() bool {
 	return id == ChunkID{}
+}
+
+// Compare returns -1, 0 or +1 as id comes before, is equal to or comes after other. The
+// order is the order of String, and the zero ChunkID comes first. It means nothing about
+// the chunks: it is a fixed order, so that a ranking of hits with equal scores comes out
+// the same in every run and from every index.
+func (id ChunkID) Compare(other ChunkID) int {
+	return bytes.Compare(id.sum[:], other.sum[:])
 }
 
 // String returns the ID as 64 hexadecimal digits, or "" for the zero ChunkID.

@@ -1,0 +1,47 @@
+package search
+
+import (
+	"context"
+	"errors"
+
+	"github.com/aluiziodeveloper/garimpo/internal/domain/retrieval"
+	"github.com/aluiziodeveloper/garimpo/internal/domain/shared"
+)
+
+var (
+	// ErrWrongDimension is wrapped when a vector or a query does not have the index's
+	// dimension: vectors of two models in one index, which no score can compare.
+	ErrWrongDimension = errors.New("wrong dimension for the index")
+
+	// ErrDuplicateChunk is wrapped when Add gets a chunk the index already has. A chunk
+	// has one vector; a second one would make it two hits.
+	ErrDuplicateChunk = errors.New("chunk already in the index")
+
+	// ErrZeroChunk is wrapped when Add gets the zero ChunkID, which identifies no chunk.
+	ErrZeroChunk = errors.New("zero chunk ID")
+
+	// ErrInvalidK is wrapped when Search is asked for fewer than one hit.
+	ErrInvalidK = errors.New("k must be at least 1")
+)
+
+// VectorIndex keeps the vectors of the chunks and finds the ones closest to a query: the
+// port to every index of Garimpo, the exact one of module 12 and the HNSW of module 13.
+//
+// Add keeps v as the vector of the chunk id. It fails, and keeps nothing, with an error
+// that wraps ErrZeroChunk for the zero ChunkID, ErrWrongDimension for a vector without the
+// index's dimension and ErrDuplicateChunk for a chunk the index already has.
+//
+// Search returns at most k hits, best first in the order of retrieval.Compare, each with
+// the dot product of q and the chunk's vector as its score. With fewer than k vectors in
+// the index, it returns them all. It fails with an error that wraps ErrInvalidK when k is
+// below 1, ErrWrongDimension when q does not have the index's dimension, and ctx's error
+// when ctx is done before the search starts. An exact index returns the k best; an
+// approximate one may miss some, as measured by recall.
+//
+// Len returns how many vectors the index keeps. Add, Search and Len are safe for
+// concurrent calls. indextest.Contract checks all of this.
+type VectorIndex interface {
+	Add(id shared.ChunkID, v shared.Vector) error
+	Search(ctx context.Context, q shared.Vector, k int) ([]retrieval.Hit, error)
+	Len() int
+}
