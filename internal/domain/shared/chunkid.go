@@ -54,3 +54,21 @@ func (id ChunkID) String() string {
 	}
 	return hex.EncodeToString(id.sum[:])
 }
+
+// ParseChunkID returns the ChunkID whose String is s: 64 lower-case hexadecimal digits,
+// not all zero. It is the way back for an ID stored as text, such as in the journal.
+func ParseChunkID(s string) (ChunkID, error) {
+	var id ChunkID
+	if len(s) != 2*len(id.sum) {
+		return ChunkID{}, fmt.Errorf("%w: %d characters, want %d", ErrInvalidChunkID, len(s), 2*len(id.sum))
+	}
+	if _, err := hex.Decode(id.sum[:], []byte(s)); err != nil {
+		return ChunkID{}, fmt.Errorf("%w: %w", ErrInvalidChunkID, err)
+	}
+	// hex.Decode takes upper case, and 64 zeros decode to the zero ChunkID. String writes
+	// neither (lower case only, "" for the zero ID), so comparing with it rejects both.
+	if id.String() != s {
+		return ChunkID{}, fmt.Errorf("%w: %q is not in canonical form", ErrInvalidChunkID, s)
+	}
+	return id, nil
+}
