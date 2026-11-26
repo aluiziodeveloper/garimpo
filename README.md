@@ -49,6 +49,15 @@ docker compose exec dev sh -c 'curl -s $GARIMPO_OLLAMA_URL/api/generate -d "{\"m
 
 To give Ollama more CPUs, change the variable for both services: `OLLAMA_CPUS=8 docker compose up -d`.
 
+`garimpo ingest` runs the ingestion over a corpus with `all-minilm:22m` on that Ollama
+(`internal/adapters/ollama`), and the adapter's tests run the `Embedder` contract against it
+when `GARIMPO_OLLAMA_URL` is set, as it is in the `dev` container (the CI skips them):
+
+```bash
+docker compose exec dev go run ./cmd/garimpo ingest -corpus /usr/local/go/src/errors
+docker compose exec dev go test -run Ollama -v ./internal/adapters/ollama
+```
+
 ## Checks
 
 The same commands run in CI on every pull request:
