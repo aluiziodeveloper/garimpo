@@ -79,6 +79,7 @@ func ingestCorpus(args []string, out io.Writer) error {
 	ctxTokens := fl.Int("context", 512, "the model's context in tokens; a longer chunk fails")
 	batch := fl.Int("batch", 1, "the most chunks in one request to the model; 1 sends them one by one")
 	wait := fl.Duration("batch-wait", 10*time.Millisecond, "how long a batch waits to fill up")
+	split := fl.Bool("split", false, "cut a chunk over the context at line breaks and embed the halves")
 	if err := fl.Parse(args); err != nil {
 		return err
 	}
@@ -92,6 +93,9 @@ func ingestCorpus(args []string, out io.Writer) error {
 	}
 	var embedder ingest.Embedder = &ollama.Embedder{
 		URL: *url, Model: *model, Dim: *dim, Context: *ctxTokens, NumThread: threads,
+	}
+	if *split {
+		embedder = &ollama.Splitter{Next: embedder}
 	}
 	if *batch > 1 {
 		b, berr := ollama.NewBatcher(embedder, *batch, *wait)

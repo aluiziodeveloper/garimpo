@@ -14,8 +14,10 @@ import (
 )
 
 // fourDims answers POST /api/embed with the vector [1 2 3 4] for every input, and
-// records how many inputs each request had.
+// records how many inputs each request had. With a context, an input of more bytes gets
+// Ollama's answer to a text over the context.
 type fourDims struct {
+	context int
 	mu      sync.Mutex
 	batches []int
 }
@@ -29,6 +31,12 @@ func (f *fourDims) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	f.batches = append(f.batches, len(req.Input))
 	f.mu.Unlock()
+	for _, text := range req.Input {
+		if f.context > 0 && len(text) > f.context {
+			http.Error(w, `{"error":"the input length exceeds the context length"}`, http.StatusBadRequest)
+			return
+		}
+	}
 	embeddings := make([][]float32, len(req.Input))
 	for i := range embeddings {
 		embeddings[i] = []float32{1, 2, 3, 4}
@@ -94,6 +102,28 @@ func TestIngestBatchesTheChunks(t *testing.T) {
 	}
 	if total != 12 || len(f.batches) == 12 {
 		t.Errorf("requests had %v inputs, want 12 in fewer than 12 requests", f.batches)
+	}
+}
+
+func TestIngestSplitsALongChunk(t *testing.T) {
+	long := "package a\n\n" + strings.Repeat("var x = 1\n", 20) // 212 bytes, 22 lines
+	dir := corpusOf(t, map[string]string{"a.go": long})
+	srv := httptest.NewServer(&fourDims{context: 64})
+	defer srv.Close()
+	for _, c := range []struct {
+		split string
+		want  string
+	}{
+		{"-split=false", "completed documents=1 chunks=1 embedded=0 failed=1 "},
+		{"-split", "completed documents=1 chunks=1 embedded=1 failed=0 "},
+	} {
+		var out bytes.Buffer
+		if err := run([]string{"ingest", "-corpus", dir, "-ollama", srv.URL, "-dim", "4", c.split}, &out); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.HasPrefix(out.String(), c.want) {
+			t.Errorf("%s: output = %q, want it to start with %q", c.split, out.String(), c.want)
+		}
 	}
 }
 
