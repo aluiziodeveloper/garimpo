@@ -3,7 +3,7 @@
 // The compiler decides, and says why with -gcflags=-m; testing.AllocsPerRun counts what
 // each decision costs at run time.
 //
-//	go build -gcflags=-m ./labs/escape
+//	go build -o /dev/null -gcflags=-m ./labs/escape
 //	go run ./labs/escape
 package main
 
