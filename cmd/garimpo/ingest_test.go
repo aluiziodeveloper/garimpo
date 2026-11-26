@@ -213,3 +213,32 @@ func TestIngestPausesOnSIGTERM(t *testing.T) {
 		t.Fatalf("second ingest output = %q, want it completed, skipping what the first one did", out.String())
 	}
 }
+
+// A failed run is final: ingest does not run it again, says why it failed and how to start
+// over, and calls the model no more.
+func TestIngestRefusesAFailedRunOfTheJournal(t *testing.T) {
+	dir := corpusOf(t, map[string]string{"a.go": "package a\n"})
+	var f fourDims
+	srv := httptest.NewServer(&f)
+	defer srv.Close()
+	path := filepath.Join(t.TempDir(), "ingest.journal")
+	j, err := journal.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = j.Append([]ingestion.Event{
+		ingestion.RunStarted{Run: "ingest"},
+		ingestion.RunFailed{Run: "ingest", Reason: "read a.go: permission denied"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err = j.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	err = run([]string{"ingest", "-corpus", dir, "-ollama", srv.URL, "-dim", "4", "-journal", path}, &bytes.Buffer{})
+	want := "the run in " + path + " failed (read a.go: permission denied): remove the journal to start over"
+	if err == nil || !strings.Contains(err.Error(), want) || len(f.batches) != 0 {
+		t.Fatalf("ingest of a failed run: err = %v after %d requests; want %q and none", err, len(f.batches), want)
+	}
+}
