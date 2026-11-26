@@ -28,6 +28,7 @@ the lessons use the Portuguese word in parentheses.
 | **skipped chunk** (trecho pulado) | A chunk a resumed run cuts and does not embed, because the journal has it as confirmed or failed (`skipped=` in the progress) | 10-07 |
 | **index snapshot** (fotografia do índice) | An immutable, complete version of the index; a query only ever reads one (RN05) | 03-02 |
 | **hit** (acerto) | A chunk returned by a search, with its score | 03-02 |
+| **ranking** (ranking) | The hits of a search, best first: the higher score first and, between equal scores, the lower `ChunkID` (`retrieval.Compare`), so every index and every run rank them the same way | 12-02 |
 | **answer** (resposta) | Generated text grounded in chunks, with citations | 03-02 |
 
 ## Design
@@ -60,6 +61,11 @@ the lessons use the Portuguese word in parentheses.
 | **write-ahead log (WAL)** | A log written before the state it records is acted on, so that a crash loses nothing that was confirmed: Garimpo's journal | 10-02 |
 | **event sourcing** | Keeping the events as the truth and the state as what they add up to: `ingestion.RestoreRun` rebuilds a run by running again the command each event records | 10-02 |
 | **graceful shutdown** | Stopping on request without losing work: no new work starts, the work in flight finishes and is recorded, the run pauses. `SIGTERM` does it for `garimpo ingest`; a second signal ends the process | 10-08 |
+| **exact index** (índice exato) | An index that returns the k best of every search, scanning every vector: `flatindex`. It is the baseline of recall for an approximate index | 12-03 |
+| **top-k** | The k best of a set by some order. A search keeps the top 10 of one score per vector | 12-04 |
+| **heap** | The data structure, not the memory: a binary tree in a slice where every parent ranks before its children, so the root is the first. A heap of k with the worst at the root keeps the top k: a score better than the root replaces it in log₂(k) comparisons (`topk.Keeper`) | 12-04 |
+| **shard** | One part of an index that holds some of the vectors and is searched on its own. In `flatindex.Sharded`, a hash of the `ChunkID` picks the shard | 12-07 |
+| **scatter-gather** | Sending one request to every shard at once (scatter) and merging their answers (gather). It lowers the latency of a request while there are idle CPUs, and adds nothing to the throughput when there are none (lesson 12-08) | 12-07 |
 
 ## Go and runtime
 
@@ -125,6 +131,8 @@ the lessons use the Portuguese word in parentheses.
 | **`simd/archsimd`** | Go 1.27's experimental package of the amd64 vector registers as types (`Float32x8`), with `archsimd.X86` to ask the processor what it has. It exists only with `GOEXPERIMENT=simd` and is outside the Go 1 promise; `simd` is the portable one, as wide as the machine | 11-06 |
 | **`ClearAVXUpperBits`** | `VZEROUPPER`: clears the upper half of the vector registers after AVX code, before SSE instructions use them. Without it, the AVX2 dot product went from 58 to 145 ns (`labs/simd`) | 11-07 |
 | **memory-bound** (preso à memória) | A loop whose pace is set by how fast the data come from memory, not by the arithmetic. The exact search over the whole corpus reads 64 MB per query, more than the 24 MiB of L3: SIMD took 44% off a search that fits in the cache and 20% off this one | 11-09 |
+| **`container/heap`** | The standard library's heap, on any type that implements `heap.Interface` (`Len`, `Less`, `Swap`, `Push`, `Pop`). `heap.Push` and `heap.Pop` pass the values as `any`, which may allocate; `heap.Init` and `heap.Fix` move values already in the slice and do not | 12-05 |
+| **`hash/maphash`** | A fast, seeded hash of strings, bytes and, since Go 1.24, any comparable value (`maphash.Comparable`). Not for cryptography; the seed changes from one process to the next | 12-07 |
 
 ## Infrastructure
 
