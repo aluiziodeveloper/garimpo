@@ -107,3 +107,11 @@ All taken on 2026-11-25 with Go 1.27.4.
   `Vector` checks the dimension and calls `vec.Dot`) and `vec` keeps the speed: the faster
   versions of module 11, SIMD included, change one package and no layer. The same rules as
   `internal/seq` apply: no business rules, only the standard library, any layer may import it.
+- **2026-11-26, module 12: the retrieval context gets its package, and `ChunkID` an order.**
+  `internal/domain/retrieval` holds `Hit` and `Compare`, the order of a ranking: the higher
+  score first and, between equal scores, the lower `ChunkID`. For that, the shared kernel
+  gained `ChunkID.Compare`, the order of `String`; it says nothing about the chunks, and
+  exists so that every index ranks equal scores the same way (ADR 0003).
+- **2026-11-26, module 12: `internal/topk`, a third support package outside the layers.**
+  `topk.Keeper[T]` keeps the k best of a stream, for every index. The same rules as
+  `internal/seq` and `internal/vec` apply.
