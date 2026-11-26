@@ -3,9 +3,11 @@ package embeddertest
 import (
 	"context"
 	"crypto/sha256"
+	"fmt"
 	"slices"
 	"sync"
 
+	"github.com/aluiziodeveloper/garimpo/internal/app/ingestion"
 	"github.com/aluiziodeveloper/garimpo/internal/domain/shared"
 )
 
@@ -16,17 +18,26 @@ const FakeDim = 8
 // so equal texts get equal vectors and different texts, almost surely, different ones.
 // It records the texts of each call. The zero Fake is ready to use.
 type Fake struct {
+	// Context is the most bytes a text may have, standing for the model's context in
+	// tokens; a longer text fails the call with ErrTextTooLong. Zero means no limit.
+	Context int
+
 	mu    sync.Mutex
 	calls [][]string
 }
 
-// Embed returns one vector per text, or ctx's error if ctx is done.
+// Embed returns one vector per text, ctx's error if ctx is done, or ErrTextTooLong.
 func (f *Fake) Embed(ctx context.Context, texts []string) ([]shared.Vector, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	if len(texts) == 0 {
 		return nil, nil
+	}
+	for i, text := range texts {
+		if f.Context > 0 && len(text) > f.Context {
+			return nil, fmt.Errorf("%w: text %d has %d bytes, the context %d", ingestion.ErrTextTooLong, i, len(text), f.Context)
+		}
 	}
 	f.mu.Lock()
 	f.calls = append(f.calls, slices.Clone(texts))

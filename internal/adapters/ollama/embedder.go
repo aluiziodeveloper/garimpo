@@ -10,29 +10,40 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 
+	"github.com/aluiziodeveloper/garimpo/internal/app/ingestion"
 	"github.com/aluiziodeveloper/garimpo/internal/domain/shared"
 )
 
-// Embedder is the ingestion.Embedder backed by Ollama's POST /api/embed.
+// Embedder is the ingestion.Embedder backed by Ollama's POST /api/embed. It always asks
+// Ollama not to truncate: by default Ollama cuts a text over the context in silence, and
+// the vector of the first part looks like a vector of the whole text (INC-08).
 type Embedder struct {
 	URL       string       // the server, such as http://ollama:11434
 	Model     string       // the embedding model, such as all-minilm:22m
 	Dim       int          // the model's dimension: every vector must have it (RN07)
+	Context   int          // the model's context in tokens, sent as options.num_ctx
 	NumThread int          // sent as options.num_thread; 0 leaves it to Ollama (D31)
 	Client    *http.Client // nil means http.DefaultClient
 }
 
 // embedRequest and embedResponse are Ollama's words. They stay in this file.
 type embedRequest struct {
-	Model   string        `json:"model"`
-	Input   []string      `json:"input"`
-	Options *embedOptions `json:"options,omitempty"`
+	Model    string        `json:"model"`
+	Input    []string      `json:"input"`
+	Truncate bool          `json:"truncate"` // always false: fail instead of cutting
+	Options  *embedOptions `json:"options,omitempty"`
 }
 
 type embedOptions struct {
+	NumCtx    int `json:"num_ctx,omitempty"`
 	NumThread int `json:"num_thread,omitempty"`
 }
+
+// tooLong is how Ollama 0.40.16 answers, with 400 Bad Request, an input over the context
+// when truncate is false.
+const tooLong = "the input length exceeds the context length"
 
 type embedResponse struct {
 	Embeddings [][]float32 `json:"embeddings"`
@@ -48,11 +59,14 @@ func (e *Embedder) Embed(ctx context.Context, texts []string) ([]shared.Vector, 
 		return nil, nil
 	}
 	req := embedRequest{Model: e.Model, Input: texts}
-	if e.NumThread > 0 {
-		req.Options = &embedOptions{NumThread: e.NumThread}
+	if e.Context > 0 || e.NumThread > 0 {
+		req.Options = &embedOptions{NumCtx: e.Context, NumThread: e.NumThread}
 	}
 	var resp embedResponse
 	if err := e.post(ctx, "/api/embed", req, &resp); err != nil {
+		if strings.Contains(err.Error(), tooLong) {
+			return nil, fmt.Errorf("ollama embed: %w: %w", ingestion.ErrTextTooLong, err)
+		}
 		return nil, fmt.Errorf("ollama embed: %w", err)
 	}
 	if len(resp.Embeddings) != len(texts) {

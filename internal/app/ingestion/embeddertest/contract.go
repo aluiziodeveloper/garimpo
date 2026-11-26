@@ -18,8 +18,9 @@ import (
 const same = 1e-4
 
 // Contract runs the tests every ingestion.Embedder must pass. newEmbedder returns the
-// Embedder under test; each subtest asks for its own.
-func Contract(t *testing.T, newEmbedder func(t *testing.T) ingestion.Embedder) {
+// Embedder under test; each subtest asks for its own. tooLong is a text over that
+// Embedder's context: it must fail, never be cut in silence (INC-08).
+func Contract(t *testing.T, newEmbedder func(t *testing.T) ingestion.Embedder, tooLong string) {
 	t.Run("OneVectorPerTextInOrder", func(t *testing.T) {
 		vs := embed(t, newEmbedder(t), "func main() {}", "the corpus", "func main() {}")
 		if len(vs) != 3 {
@@ -44,6 +45,13 @@ func Contract(t *testing.T, newEmbedder func(t *testing.T) ingestion.Embedder) {
 			if d := batch[i].Dot(one[0]); d < 1-same {
 				t.Errorf("text %d: the batch and the single call disagree, dot %v", i, d)
 			}
+		}
+	})
+
+	t.Run("ATextOverTheContextFails", func(t *testing.T) {
+		_, err := newEmbedder(t).Embed(t.Context(), []string{"short", tooLong})
+		if !errors.Is(err, ingestion.ErrTextTooLong) {
+			t.Fatalf("Embed of a text over the context: err = %v, want ErrTextTooLong", err)
 		}
 	})
 
