@@ -22,6 +22,7 @@ the lessons use the Portuguese word in parentheses.
 | **citation** (citação) | Lines of a chunk that exists in the corpus, printed as `path:line` or `path:start-end` (RN01) | 03-08 |
 | **ingestion run** (rodada de coleta) | One pass of reading, cutting and embedding the corpus, which can be paused and resumed | 03-02 |
 | **pending chunk** (trecho pendente) | A chunk cut and not yet embedded or failed. RN03 bounds how many exist at once (`Config.MaxPending`, 256 by default) | 07-09 |
+| **concurrency limit** (limite de concorrência) | How many calls may go to the embedding model at the same time, moved by the adaptive limiter (`Config.Limiter`). RN04: no new call starts above it; when it goes down, the calls in flight finish | 09-07 |
 | **progress** (progresso) | What an ingestion run has done so far: documents read, chunks cut, embedded and failed, and the pending ones. A snapshot of it is one moment of the run (`ingestion.Progress`) | 05-07 |
 | **index snapshot** (fotografia do índice) | An immutable, complete version of the index; a query only ever reads one (RN05) | 03-02 |
 | **hit** (acerto) | A chunk returned by a search, with its score | 03-02 |
@@ -48,6 +49,12 @@ the lessons use the Portuguese word in parentheses.
 | **contract test** | One suite every implementation of a port must pass, such as `embeddertest.Contract` for the fake, the Ollama adapter, the `Batcher` and a real Ollama. It lives outside the port's package, so the port's own tests do not import it back | 08-02 |
 | **decorator** | A type that implements a port by wrapping another implementation of it and adding a behavior, such as the `Batcher` in front of the Ollama `Embedder` | 08-07 |
 | **micro-batching** | Gathering the calls of concurrent callers into one request, sent when it is full or a short wait after its first call, whichever comes first. It pays when a request costs more than its work (lesson 08-09) | 08-07 |
+| **Little's law** | L = λ·W: the calls in a system are its throughput times the time each one spends in it. With the throughput fixed by the slowest stage, more calls in the system only make each one wait longer (INC-09) | 09-02 |
+| **closed loop** | Callers that wait for each answer before the next call, such as the ingestion's workers: more of them never raise the throughput past the service's capacity, only the queue in front of it | 09-02 |
+| **AIMD** | Additive increase, multiplicative decrease: a limit that goes up by one while things go well and is multiplied by a factor under 1 when they do not, as in TCP's congestion control | 09-04 |
+| **adaptive limiter** | A concurrency limit that follows the latency of the calls instead of a fixed number: `internal/app/limiter`, AIMD with a tolerance of 1.5 times the base and a backoff of 0.9 | 09-05 |
+| **base latency** | The latency of a call with no queue. The limiter takes the lowest smoothed mean it saw (weight 1/8), so a service that gets slower for good pins the limit at `Min` | 09-05 |
+| **permit** | The right to make one call, from `Acquire`. `Done` ends a call that worked and gives its latency to the limiter; `Discard` ends one that failed or was canceled, with no sample | 09-05 |
 
 ## Go and runtime
 
