@@ -92,6 +92,26 @@ docker compose exec dev go run ./cmd/garimpo ingest -corpus /usr/local/go/src/en
 completed documents=48 chunks=1038 embedded=1038 failed=0 pending=0 in 32.162s (adaptive limit 2 of 16)
 ```
 
+`BenchmarkAdaptive` measures it on that Ollama: the ingestion of `encoding/json` (1,038 chunks),
+on the `bench` service (Ollama with its default 4 CPUs), 6 runs each; the latency is of one
+call to the model:
+
+| Workers | Chunks/s | p50 | p99 | Limit at the end |
+|---|---|---|---|---|
+| 1 | 32.52 ± 2% | 30.3 ms | 47.8 ms | |
+| 16 | 33.34 ± 1% | 479.2 ms | 592.8 ms | |
+| 16, `-adaptive` | 32.59 ± 1% (-2.25%, p=0.002) | 38.3 ms (-92%) | 95.5 ms (-84%) | 1 or 2 |
+
+Sixteen workers keep the model as busy as one does: the other fifteen calls only wait in
+its queue, and each call takes sixteen times as long (INC-09). The limiter gives up 2.25% of
+the throughput and takes the latency of a call back near the one of a single worker. The
+queue it removes is where a search query, from module 16 on, would wait behind the
+ingestion. `-adaptive` is off by default until then.
+
+```bash
+docker compose run --rm bench go test -run '^$' -bench Adaptive -benchtime 1x -count 6 ./cmd/garimpo
+```
+
 ## Checks
 
 The same commands run in CI on every pull request:
