@@ -116,6 +116,15 @@ the lessons use the Portuguese word in parentheses.
 | **torn write** | A write a crash cut in the middle, leaving part of a record or bytes the disk never got. The journal's CRC finds it, and `Open` drops it when it is the last line | 10-06 |
 | **`signal.NotifyContext`** | A context canceled when the process gets one of the given signals. While it is in place the signal does not end the process; `stop` gives the default back | 10-08 |
 | **`context.WithoutCancel`** | A context with the values of its parent and none of its cancellation: the calls in flight finish after a stop | 10-08 |
+| **escape analysis** | The compiler's decision, made per function, of what can live in the goroutine's stack (freed for free when the function returns) and what must go to the heap (freed by the garbage collector): a value whose address outlives the frame, or that goes into an interface, escapes. `-gcflags=-m` prints the decisions (`labs/escape`) | 11-02 |
+| **does not escape** | What `-gcflags=-m` says of a value that stays in the frame. It is not "does not allocate": a `make` of a size known only at run time gets a 32-byte buffer on the stack, and a larger one goes to the heap (`VariableMakeThreshold` in the compiler) | 11-03 |
+| **bounds check** (checagem de limites) | The comparison Go makes before `s[i]`, which panics when `i` is out of the slice. The compiler drops it when it can prove the index is in range: in `vec.Dot`, the check that the lengths are equal proves it for `b[i]`. `-gcflags=-d=ssa/check_bce/debug=1` lists the ones left | 11-04 |
+| **`benchstat`** | `golang.org/x/perf/cmd/benchstat`: compares two sets of benchmark runs and says whether the difference is beyond the noise (`p` below 0.05). Ten runs of each, on a fixed CPU, in the course | 11-05 |
+| **dependency chain** (cadeia de dependência) | Additions where each waits for the result of the one before, as in a sum with one accumulator. Four accumulators break it into four chains the processor runs at once: 26% off `vec.Dot` | 11-05 |
+| **SIMD** | One instruction on several values: a 256-bit AVX2 register holds 8 float32, and one FMA (`MulAdd`, a*b+c) handles them all | 11-06 |
+| **`simd/archsimd`** | Go 1.27's experimental package of the amd64 vector registers as types (`Float32x8`), with `archsimd.X86` to ask the processor what it has. It exists only with `GOEXPERIMENT=simd` and is outside the Go 1 promise; `simd` is the portable one, as wide as the machine | 11-06 |
+| **`ClearAVXUpperBits`** | `VZEROUPPER`: clears the upper half of the vector registers after AVX code, before SSE instructions use them. Without it, the AVX2 dot product went from 58 to 145 ns (`labs/simd`) | 11-07 |
+| **memory-bound** (preso à memória) | A loop whose pace is set by how fast the data come from memory, not by the arithmetic. The exact search over the whole corpus reads 64 MB per query, more than the 24 MiB of L3: SIMD took 44% off a search that fits in the cache and 20% off this one | 11-09 |
 
 ## Infrastructure
 
@@ -129,3 +138,4 @@ the lessons use the Portuguese word in parentheses.
 | **`num_ctx`** | The Ollama request option that sets the model's context in tokens. `all-minilm` gets 256 unless asked, out of the 512 it supports; Garimpo sends 512 | 08-04 |
 | **`truncate`** | The `/api/embed` field that cuts an input over the context: true by default, and silent. Garimpo always sends false, and a longer text fails with `ErrTextTooLong` (INC-08) | 08-04 |
 | **`SIGTERM`, `SIGKILL`** | The polite and the final stop. `docker stop` sends `SIGTERM`, waits 10 s and then sends `SIGKILL`, which no process can catch: nothing drains, and only what reached the journal remains | 10-08 |
+| **virtual CPU** (CPU virtual) | A CPU that WSL 2 shows Linux. The i7-13700H shows as 10 cores of two threads, not 6 P-cores and 8 E-cores: a `cpuset` fixes a virtual CPU, and Hyper-V picks the physical core. Benchmarks compare A and B side by side, in one session | 11-09 |
