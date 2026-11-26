@@ -108,7 +108,9 @@ func RunIngestion(ctx context.Context, run *domain.Run, docs iter.Seq2[domain.Do
 	defer stopWaits()
 	stopped := func() bool { return ctx.Err() != nil }
 
-	changes := make(chan change)
+	// The buffer lets each stage send a change and go on while an append waits for the
+	// disk: the changes pile up there, and the next append takes them all.
+	changes := make(chan change, cfg.Workers+1)
 	send := func(c change) error {
 		select {
 		case changes <- c:
@@ -195,6 +197,16 @@ func RunIngestion(ctx context.Context, run *domain.Run, docs iter.Seq2[domain.Do
 			continue // drain: the stages are stopping
 		}
 		err := c(run)
+		// Group commit: apply every change already waiting, then append all their events
+		// at once. While an append waits for the disk, the stages queue up their changes,
+		// and the next append takes them all: one sync per group, not per event.
+		for err == nil {
+			more, ok := waiting(changes)
+			if !ok {
+				break
+			}
+			err = more(run)
+		}
 		if err == nil {
 			err = cfg.Journal.Append(run.TakeEvents()) // durable before the run goes on
 		}
@@ -225,6 +237,16 @@ func RunIngestion(ctx context.Context, run *domain.Run, docs iter.Seq2[domain.Do
 		return err
 	}
 	return cfg.Journal.Append(run.TakeEvents())
+}
+
+// waiting returns a change already sent on changes, if there is one, without waiting.
+func waiting(changes <-chan change) (change, bool) {
+	select {
+	case c, ok := <-changes:
+		return c, ok
+	default:
+		return nil, false
+	}
 }
 
 // failure returns why the stages must end when a wait ends: the run's error if it failed,

@@ -128,13 +128,13 @@ func TestAJournalThatFailsFailsTheRun(t *testing.T) {
 	var f fakeEmbedder
 	var unused recorded
 	run, cfg := setup(t, &f, &unused)
-	j := &brokenJournal{ok: 3}
+	j := &brokenJournal{ok: 1} // RunStarted, and then the disk is gone
 	cfg.Journal = j
 	err := RunIngestion(t.Context(), run, documents(t, nil, "aaaa\nbbbb\ncccc\n", "dd\n"), cfg)
 	if !errors.Is(err, errDisk) || run.State() != domain.Failed {
 		t.Fatalf("err = %v, run %s; want errDisk and failed", err, run.State())
 	}
-	if len(j.recorded) != 3 {
-		t.Fatalf("%d events in the journal, want the 3 appended before it broke", len(j.recorded))
+	if len(j.recorded) != 1 {
+		t.Fatalf("%d events in the journal, want the RunStarted appended before it broke", len(j.recorded))
 	}
 }
