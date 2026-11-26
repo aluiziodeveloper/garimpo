@@ -92,3 +92,45 @@ func (x *Index) Len() int {
 	defer x.mu.RUnlock()
 	return len(x.ids)
 }
+
+// SearchBatch returns the k vectors closest to each query of qs, as Search would for each
+// one, reading the index once: each vector is scored against every query while it is in
+// the cache, instead of once per query from memory.
+func (x *Index) SearchBatch(ctx context.Context, qs []shared.Vector, k int) ([][]retrieval.Hit, error) {
+	if k < 1 {
+		return nil, fmt.Errorf("%w: %d", search.ErrInvalidK, k)
+	}
+	queries := make([][]float32, len(qs))
+	for i, q := range qs {
+		if q.Dim() != x.dim {
+			return nil, fmt.Errorf("%w: query %d of %d, the index has %d", search.ErrWrongDimension, i, q.Dim(), x.dim)
+		}
+		queries[i] = q.Values()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	x.mu.RLock()
+	defer x.mu.RUnlock()
+	out := make([][]retrieval.Hit, len(qs))
+	if len(x.ids) == 0 {
+		for i := range out {
+			out[i] = []retrieval.Hit{}
+		}
+		return out, nil
+	}
+	best := make([]*topk.Keeper[retrieval.Hit], len(qs))
+	for i := range best {
+		best[i] = topk.New(min(k, len(x.ids)), retrieval.Compare)
+	}
+	for i, id := range x.ids {
+		v := x.values[i*x.dim : (i+1)*x.dim]
+		for j, q := range queries {
+			best[j].Offer(retrieval.Hit{Chunk: id, Score: vec.Dot(q, v)})
+		}
+	}
+	for j := range out {
+		out[j] = best[j].Sorted()
+	}
+	return out, nil
+}
