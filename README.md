@@ -61,6 +61,24 @@ docker compose exec dev go test -run Ollama -v ./internal/adapters/ollama
 `-batch 8` gathers up to 8 chunks of concurrent workers into one request (`ollama.Batcher`):
 a batch goes out when it is full or `-batch-wait` (10 ms) after its first chunk.
 
+`BenchmarkBatch` measures it on that Ollama: 256 chunks of `net/http`, 32 workers, one chunk
+per call, on the `bench` service (Ollama with its default 4 CPUs), 6 runs each:
+
+| `-batch` | Time for 256 chunks | Chunks/s | vs one by one |
+|---|---|---|---|
+| 1 | 13.86 s ± 2% | 18.46 | |
+| 8 | 13.45 s ± 1% | 19.03 | +3.06% (p=0.002) |
+| 32 | 13.34 s ± 2% | 19.19 | +3.93% (p=0.004) |
+
+A batch saves the cost of each request, and here the model's CPU is almost all of the cost:
+the gain is 3 to 4%. So `-batch` stays 1 by default. Batching pays when each request costs
+much more than the work in it (a remote model, a GPU idle between requests); it does not pay
+when the model is already busy with the requests it has.
+
+```bash
+docker compose run --rm bench go test -run '^$' -bench Batch -benchtime 1x -count 6 ./internal/adapters/ollama
+```
+
 ## Checks
 
 The same commands run in CI on every pull request:
