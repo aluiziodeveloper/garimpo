@@ -8,5 +8,8 @@
 *.out
 *.pprof
 
+# Benchmark runs split for benchstat
+/.bs/
+
 # Local environment
 .env
