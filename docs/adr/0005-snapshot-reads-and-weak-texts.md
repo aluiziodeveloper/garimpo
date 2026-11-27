@@ -30,7 +30,8 @@ which the index does not keep.
 4. **`flatindex.Index` stays** as it was, for the comparison of the lessons. RN05 holds for
    `Published`; the HNSW index keeps its lock per node (ADR 0004).
 5. **The scan through an iterator.** `IndexSnapshot.Scores` yields each chunk with its dot
-   product; the adapter keeps the best with `topk`. It costs 3 allocations per search.
+   product; the adapter keeps the best with `topk`. It costs 3 allocations more per search
+   than the loop of `Index`: 7 against 4.
 6. **`chunktext.Store` for the texts.** It keeps where each chunk is, path, byte offset,
    length and lines, and implements `shared.ChunkFinder`. It reads a text from the corpus
    when asked, only its bytes (`io.ReaderAt`), and checks it against the `ChunkID`. A text
