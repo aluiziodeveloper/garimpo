@@ -251,6 +251,31 @@ wait for the scans.
 BENCH_CPUSET=2,4,6,8,10,12,14,16 docker compose run --rm bench sh -c 'GARIMPO_VECTORS=/src/.bs/corpus.vec go test -run TestStalenessOnTheCorpus -v ./internal/adapters/flatindex'
 ```
 
+## The texts of the chunks
+
+A search returns chunk IDs; what it shows, and what an answer cites, is their text.
+`chunktext.Store` keeps where each chunk is and reads its text from the corpus, only its
+bytes, when asked. A text read stays shared while some caller holds it: the store points to
+it with a `weak.Pointer`, so it costs nothing once nobody holds it, and
+`runtime.AddCleanup` takes its entry out after the GC frees it. On the corpus (41,980
+chunks, 26.2 MiB of text), 8 goroutines running 500 queries each, a query holding the texts
+of 10 chunks for 1 ms, a few chunks much more frequent than the rest, 8 virtual CPUs,
+2026-11-27:
+
+| | Heap | Reads of the corpus | Allocated by the queries |
+|---|---|---|---|
+| Every text held in memory | 34.5 MiB more | | |
+| The store, without its cache | | 40,000 | 90.0 MiB |
+| The store, with its cache | 8.3 MiB, with the IDs | 9,993 | 23.4 MiB |
+
+The store reads a quarter of what it would without the cache, and the texts cached are only
+those the queries in flight hold. A text taken as a substring of its file would keep the
+whole file alive: 1,000 such texts held 108.7 MiB, against 0.65 MiB for copies.
+
+```bash
+BENCH_CPUSET=2,4,6,8,10,12,14,16 docker compose run --rm bench sh -c 'GARIMPO_CORPUS=/usr/local/go/src go test -run TestStoreOnTheCorpus -v ./internal/adapters/chunktext'
+```
+
 ## Checks
 
 The same commands run in CI on every pull request:
@@ -301,7 +326,7 @@ labs cannot import `internal/`.
 | `cmd/garimpo` | The binary: argument handling and wiring |
 | `internal/domain/` | The domain: pure and sequential, no goroutines, no I/O, no global clock. `shared` is the shared kernel |
 | `internal/app/` | Use cases: orchestrate the domain and declare the ports they consume |
-| `internal/adapters/` | Adapters: implement the ports (Ollama, journal, indexes, HTTP) |
+| `internal/adapters/` | Adapters: implement the ports (Ollama, journal, indexes, the texts of the chunks, HTTP) |
 | `docs/adr/` | Architecture decision records, with an index |
 | `docs/incidents/` | Postmortems, one per incident (`INC-01.md`, ...) |
 | `docs/glossary.md` | Domain and technical glossary |

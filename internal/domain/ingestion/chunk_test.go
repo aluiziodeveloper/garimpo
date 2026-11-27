@@ -85,6 +85,18 @@ func TestChunkIDIsTheIDOfPathLinesAndText(t *testing.T) {
 	}
 }
 
+// The offset of a chunk is where its text starts in the document's: what lets an adapter
+// read it again from the file.
+func TestOffsetIsWhereTheTextStarts(t *testing.T) {
+	c, _ := NewCutter(10)
+	d := file(t, "aaaa\nbbbb\n"+strings.Repeat("x", 25)+"\n")
+	for ch := range c.Cut(d) {
+		if got := d.Text()[ch.Offset() : ch.Offset()+len(ch.Text())]; got != ch.Text() {
+			t.Errorf("chunk %d-%d at offset %d: the document has %q there, want %q", ch.Start(), ch.End(), ch.Offset(), got, ch.Text())
+		}
+	}
+}
+
 // TestEveryChunkHasItsOwnID cuts a line of 30 equal bytes into three equal pieces: same
 // path, same line, same text. As in time/tzdata/zzipdata.go, they are three chunks.
 func TestEveryChunkHasItsOwnID(t *testing.T) {

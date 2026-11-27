@@ -37,6 +37,7 @@ func NewCutter(window int) (Cutter, error) {
 type Chunk struct {
 	id         shared.ChunkID
 	path       string
+	offset     int
 	start, end int
 	text       string
 }
@@ -46,6 +47,9 @@ func (c Chunk) ID() shared.ChunkID { return c.id }
 
 // Path returns the path of the document the chunk was cut from.
 func (c Chunk) Path() string { return c.path }
+
+// Offset returns the byte of the document where the text of the chunk starts.
+func (c Chunk) Offset() int { return c.offset }
 
 // Start returns the first line of the chunk, counting from 1.
 func (c Chunk) Start() int { return c.start }
@@ -104,5 +108,5 @@ func newChunk(path string, offset, start, end int, text string) Chunk {
 	if err != nil {
 		panic(fmt.Sprintf("ingestion: chunk %s:%d-%d: %v", path, start, end, err))
 	}
-	return Chunk{id: id, path: path, start: start, end: end, text: text}
+	return Chunk{id: id, path: path, offset: offset, start: start, end: end, text: text}
 }
