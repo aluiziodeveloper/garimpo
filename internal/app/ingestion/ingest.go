@@ -35,6 +35,10 @@ type Config struct {
 	// Journal, when set, gets the run's events as they happen, and an event is durable
 	// before the run goes on (RN02). An Append that fails fails the run.
 	Journal Journal
+	// Vectors, when set, keeps the vector of every chunk embedded, before the chunk is
+	// confirmed: a chunk the journal confirms has its vector. An Add that fails fails the
+	// run.
+	Vectors VectorStore
 }
 
 // change is something a stage asks the run's owner to apply to the run.
@@ -244,8 +248,8 @@ func (discard) Replay() iter.Seq2[domain.Event, error] {
 
 // embed asks cfg.Embedder for the vector of c and sends the outcome to the run's owner.
 // A canceled context and a broken contract are errors of the stage; an embedder error
-// fails the chunk. Module 12 keeps the vector in an index; until then it is checked and
-// dropped.
+// fails the chunk. The vector goes to cfg.Vectors, when set, before the chunk is confirmed;
+// a vector that cannot be kept is an error of the stage, like a journal that cannot append.
 //
 // The call and the send use ctx, which ends only when the run fails; the wait for a
 // permit uses waits, which a stop ends too: a worker that has no permit yet takes none.
@@ -276,6 +280,11 @@ func embed(ctx, waits context.Context, cfg Config, c domain.Chunk, send func(cha
 	}
 	if len(vs) != 1 {
 		return fmt.Errorf("%w: %d vectors for 1 text", ErrBrokenEmbedder, len(vs))
+	}
+	if cfg.Vectors != nil {
+		if err := cfg.Vectors.Add(id, vs[0]); err != nil {
+			return fmt.Errorf("keeping the vector of chunk %s: %w", id, err)
+		}
 	}
 	cfg.Progress.ChunkEmbedded()
 	return send(func(r *domain.Run) error { return r.ConfirmChunk(id) })

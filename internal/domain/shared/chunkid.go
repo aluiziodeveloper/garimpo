@@ -64,6 +64,33 @@ func (id ChunkID) String() string {
 	return hex.EncodeToString(id.sum[:])
 }
 
+// ChunkIDSize is the length of a ChunkID in bytes, as AppendBinary writes it.
+const ChunkIDSize = sha256.Size
+
+// AppendBinary appends the 32 bytes of id to b, the way to store an ID in a binary file
+// (encoding.BinaryAppender). It fails for the zero ChunkID, which identifies no chunk.
+func (id ChunkID) AppendBinary(b []byte) ([]byte, error) {
+	if id.IsZero() {
+		return b, fmt.Errorf("%w: the zero ChunkID", ErrInvalidChunkID)
+	}
+	return append(b, id.sum[:]...), nil
+}
+
+// UnmarshalBinary sets id to the ChunkID whose AppendBinary wrote data: ChunkIDSize bytes,
+// not all zero (encoding.BinaryUnmarshaler).
+func (id *ChunkID) UnmarshalBinary(data []byte) error {
+	var back ChunkID
+	if len(data) != len(back.sum) {
+		return fmt.Errorf("%w: %d bytes, want %d", ErrInvalidChunkID, len(data), len(back.sum))
+	}
+	copy(back.sum[:], data)
+	if back.IsZero() {
+		return fmt.Errorf("%w: %d zero bytes", ErrInvalidChunkID, len(data))
+	}
+	*id = back
+	return nil
+}
+
 // ParseChunkID returns the ChunkID whose String is s: 64 lower-case hexadecimal digits,
 // not all zero. It is the way back for an ID stored as text, such as in the journal.
 func ParseChunkID(s string) (ChunkID, error) {

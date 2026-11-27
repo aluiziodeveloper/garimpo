@@ -46,6 +46,11 @@ func run(args []string, out io.Writer) error {
 		return scan(args[1:], out)
 	case "ingest":
 		return ingestCorpus(args[1:], out)
+	case "serve":
+		// SIGINT and SIGTERM stop the server: it lets the requests in flight answer.
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		return serve(ctx, args[1:], out)
 	default:
 		return fmt.Errorf("unknown command %q", args[0])
 	}
@@ -86,7 +91,7 @@ func ingestCorpus(args []string, out io.Writer) error {
 	wait := fl.Duration("batch-wait", 10*time.Millisecond, "how long a batch waits to fill up")
 	adaptive := fl.Bool("adaptive", false, "move the calls to the model at the same time with their latency, up to -workers (RN04)")
 	journalPath := fl.String("journal", "", "the file of the run's events; a run stopped midway resumes from it (RN02)")
-	vectorsPath := fl.String("vectors", "", "a file to write the vectors to, to measure an index on them; created anew, so a resumed run writes only the chunks it embeds")
+	vectorsPath := fl.String("vectors", "", "the file to keep the vector of every chunk embedded in, with its chunk, for garimpo serve; a resumed run adds to it")
 	if err := fl.Parse(args); err != nil {
 		return err
 	}
@@ -138,10 +143,10 @@ func ingestCorpus(args []string, out io.Writer) error {
 	// The last thing before the run: from here on, every path closes the file of vectors.
 	var vectors *vectorfile.Writer
 	if *vectorsPath != "" {
-		if vectors, err = vectorfile.Create(*vectorsPath, *dim); err != nil {
+		if vectors, err = vectorfile.Open(*vectorsPath, *dim); err != nil {
 			return fmt.Errorf("ingest: %w", err)
 		}
-		cfg.Embedder = vectorfile.Record(cfg.Embedder, vectors)
+		cfg.Vectors = vectors
 	}
 	// SIGINT (Ctrl+C) and SIGTERM (docker stop, kill) stop the run: it drains and pauses.
 	// After the first signal, the default comes back, and a second one ends the process.

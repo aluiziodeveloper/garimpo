@@ -73,7 +73,8 @@ func TestIngestEmbedsTheCorpus(t *testing.T) {
 	}
 }
 
-// With -vectors, ingest writes the vector of every chunk it embeds to the file.
+// With -vectors, ingest keeps the vector of every chunk it embeds in the file, with the ID
+// of the chunk; a second run adds nothing, since the run is completed.
 func TestIngestWritesTheVectors(t *testing.T) {
 	dir := corpusOf(t, map[string]string{"a.go": "package a\n", "b/b.go": "package b\n", "c.go": "package c\n"})
 	srv := httptest.NewServer(new(fourDims))
@@ -83,12 +84,12 @@ func TestIngestWritesTheVectors(t *testing.T) {
 	if err := run([]string{"ingest", "-corpus", dir, "-ollama", srv.URL, "-dim", "4", "-vectors", path}, &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
 	}
-	vs, err := vectorfile.Read(path)
+	got, err := vectorfile.ReadChunks(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(vs) != 3 || vs[0].Dim() != 4 {
-		t.Fatalf("the file has %d vectors, want 3 of 4 dimensions", len(vs))
+	if len(got) != 3 || got[0].Vector.Dim() != 4 || got[0].ID.IsZero() || got[0].ID == got[1].ID {
+		t.Fatalf("the file has %d chunks, want 3 different ones with vectors of 4 dimensions", len(got))
 	}
 }
 

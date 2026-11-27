@@ -29,3 +29,11 @@ var ErrTextTooLong = errors.New("text over the model's context")
 type Embedder interface {
 	Embed(ctx context.Context, texts []string) ([]shared.Vector, error)
 }
+
+// VectorStore keeps the vector of each chunk the ingestion embeds, under the chunk's ID: the
+// port to where a search will find them (garimpo serve, module 16). Add is safe for
+// concurrent calls; when it returns nil, the vector is kept, across processes if the store
+// says so, before the chunk is confirmed.
+type VectorStore interface {
+	Add(id shared.ChunkID, v shared.Vector) error
+}

@@ -52,7 +52,7 @@ func (s *Searcher) Search(ctx context.Context, q retrieval.Query, k int) ([]Resu
 	case q.IsZero():
 		return nil, retrieval.ErrEmptyQuery
 	case k < 1 || k > MaxK:
-		return nil, fmt.Errorf("%w: %d, at most %d", ErrInvalidK, k, MaxK)
+		return nil, fmt.Errorf("%w, and the use case gives at most %d: k = %d", ErrInvalidK, MaxK, k)
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
