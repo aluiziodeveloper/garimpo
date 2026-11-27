@@ -357,7 +357,9 @@ use case `search.Searcher` over `search.Hybrid`, with a citation, the text and t
 each result, as JSON of `encoding/json/v2`: the code in the texts goes out as it is,
 without the escapes for HTML of v1, and no results is `[]`. Every search has `-timeout` (2 s by default) to answer, counted from when the
 request arrives: past it, the search is canceled and the answer is 504. A bad query or `k`
-is 400. SIGINT or SIGTERM stops the server: it takes no new request and lets the ones in
+is 400. Equal searches at once, the same query with the same `k`, run one search
+(`search.Collapse`, with `singleflight`): the others wait for it and get its results, and a
+client that leaves does not cancel it for the rest. SIGINT or SIGTERM stops the server: it takes no new request and lets the ones in
 flight answer.
 
 It listens on `localhost:8080` in the `dev` container, and publishes no port: search from
