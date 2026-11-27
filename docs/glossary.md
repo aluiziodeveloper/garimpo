@@ -26,7 +26,8 @@ the lessons use the Portuguese word in parentheses.
 | **journal** (diário) | The file of a run's events, in the order the run recorded them, one line each with the CRC-32C of its JSON (`journal.File`). A chunk confirmed in it is never embedded again (RN02) | 10-05 |
 | **progress** (progresso) | What an ingestion run has done so far: documents read, chunks cut, embedded and failed, and the pending ones. A snapshot of it is one moment of the run (`ingestion.Progress`) | 05-07 |
 | **skipped chunk** (trecho pulado) | A chunk a resumed run cuts and does not embed, because the journal has it as confirmed or failed (`skipped=` in the progress) | 10-07 |
-| **index snapshot** (fotografia do índice) | An immutable, complete version of the index; a query only ever reads one (RN05) | 03-02 |
+| **index snapshot** (fotografia do índice) | An immutable, complete version of the index; a query only ever reads one (RN05). `indexing.IndexSnapshot` has a version number, and `With` returns the next version | 03-02, 14-05 |
+| **staleness** (defasagem) | How long a change takes to be seen by the readers: from the start of an `Add` to a search finding the vector. 25 µs at p50 for `flatindex.Published` | 14-07 |
 | **hit** (acerto) | A chunk returned by a search, with its score | 03-02 |
 | **ranking** (ranking) | The hits of a search, best first: the higher score first and, between equal scores, the lower `ChunkID` (`retrieval.Compare`), so every index and every run rank them the same way | 12-02 |
 | **answer** (resposta) | Generated text grounded in chunks, with citations | 03-02 |
@@ -74,6 +75,9 @@ the lessons use the Portuguese word in parentheses.
 | **`M`, `EfConstruction`, `EfSearch`** | The knobs of HNSW: the links per node (2·M on level 0), the candidates an insert considers, and the candidates a search keeps on level 0. Garimpo uses 16, 200 and 64 | 13-02 |
 | **recall@k** | The share of the k best by the exact index that an approximate index returns, over a set of queries. RNF04 asks for 0.95 at k = 10 | 13-05 |
 | **lock per node** (trava por nó) | A lock in each node of a structure for what only that node holds, here its links: two goroutines wait for each other only on the same node | 13-06 |
+| **CQRS** | Command Query Responsibility Segregation: the side that changes the state apart from the side that reads it. In Garimpo it is light, one process and one store: `Add` makes and publishes versions, `Search` only reads them | 14-02 |
+| **eventual consistency** (consistência eventual) | A reader may not see a change yet, and will: in `flatindex.Published`, a search misses only the `Add` calls still under way | 14-02 |
+| **copy on write** (cópia na escrita) | Never changing a value that readers may hold: a write makes a new version and publishes it. Sharing the arrays is safe while one writer appends past the end of what any version holds | 14-03 |
 
 ## Go and runtime
 
@@ -143,6 +147,12 @@ the lessons use the Portuguese word in parentheses.
 | **`hash/maphash`** | A fast, seeded hash of strings, bytes and, since Go 1.24, any comparable value (`maphash.Comparable`). Not for cryptography; the seed changes from one process to the next | 12-07 |
 | **lock contention** (disputa de trava) | Goroutines that want the same lock at once, or touch the same counter of a lock: the time grows with them. An `RWMutex` read lock that never waits still adds to one counter of readers, and its cache line moves from core to core | 13-09 |
 | **mutex profile, block profile** | `-mutexprofile` records where goroutines waited for a lock, charged to the `Unlock` that let them go; `-blockprofile`, where they blocked on locks and channels. Neither shows the cost of a lock nobody waits for: the CPU profile does | 13-11 |
+| **writer preference** (preferência ao escritor) | `sync.RWMutex` makes new readers wait while a `Lock` waits, so a writer is not starved; it still waits for every reader under way (INC-14) | 14-01 |
+| **`atomic.Pointer` publication** (publicação) | Storing a pointer to a value nobody will change again, so a reader that loads it sees the whole value: the store happens after the writes, and the load before the reads (memory model) | 14-03 |
+| **`weak.Pointer`** | A pointer that does not keep its value alive: `Value` returns it while something else holds it, and `nil` after the GC frees it (`weak`, Go 1.24) | 14-08 |
+| **`unique.Handle`** | The handle of an interned value: `unique.Make` gives equal values the same handle, keeps the value once, and two handles compare as two pointers (`unique`, Go 1.23) | 14-08 |
+| **`runtime.AddCleanup`** | Runs a function, with an argument, after the GC frees a value; unlike `SetFinalizer`, it does not bring the value back, and several can watch one value. The function must not reach the value, or it never runs: Go 1.27.4 panics at `AddCleanup` when the function closes over it | 14-08 |
+| **substring retention** (retenção por substring) | A substring shares the bytes of its string: holding a small one keeps the whole string alive. 1,000 texts of chunks held as substrings of their files took 108.7 MiB; copied with `strings.Clone`, 0.65 MiB | 14-10 |
 
 ## Infrastructure
 
