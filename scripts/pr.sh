@@ -58,7 +58,15 @@ gh pr checks "$number" --watch --fail-fast
 
 # 4. Squash merge. Subject and body are explicit, so the commit on main carries
 #    exactly the title and nothing else (no trailers).
-gh pr merge "$number" --squash --delete-branch --subject "$title (#$number)" --body ""
+#    The repository deletes the branch on merge, so gh may fail to delete it again
+#    (HTTP 404) after the merge went through: what counts is the state of the PR.
+if ! gh pr merge "$number" --squash --delete-branch --subject "$title (#$number)" --body ""; then
+  if [[ "$(gh pr view "$number" --json state --jq .state)" != "MERGED" ]]; then
+    echo "pull request #$number was not merged" >&2
+    exit 1
+  fi
+  echo "pull request #$number merged; only the deletion of the branch failed"
+fi
 
 # 5. Bring main up to date and tag the merge commit.
 git switch "$main"
