@@ -88,8 +88,15 @@ func (x *Published) Search(ctx context.Context, q shared.Vector, k int) ([]retri
 		return []retrieval.Hit{}, nil
 	}
 	best := topk.New(min(k, snap.Len()), retrieval.Compare)
+	i := 0
 	for id, score := range snap.Scores(q) {
+		if i%search.ScanCheck == search.ScanCheck-1 {
+			if err := ctx.Err(); err != nil {
+				return nil, err // the caller gave up: the rest of the scan would be for no one
+			}
+		}
 		best.Offer(retrieval.Hit{Chunk: id, Score: score})
+		i++
 	}
 	return best.Sorted(), nil
 }

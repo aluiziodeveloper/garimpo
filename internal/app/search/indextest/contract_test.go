@@ -49,6 +49,11 @@ func (n *naive) Search(ctx context.Context, q shared.Vector, k int) ([]retrieval
 	defer n.mu.Unlock()
 	hits := make([]retrieval.Hit, 0, len(n.m))
 	for id, v := range n.m {
+		if len(hits)%search.ScanCheck == search.ScanCheck-1 {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+		}
 		hits = append(hits, retrieval.Hit{Chunk: id, Score: q.Dot(v)})
 	}
 	slices.SortFunc(hits, retrieval.Compare)
