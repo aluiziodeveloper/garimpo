@@ -25,7 +25,8 @@ var (
 )
 
 // VectorIndex keeps the vectors of the chunks and finds the ones closest to a query: the
-// port to every index of Garimpo, the exact one of module 12 and the HNSW of module 13.
+// port to every vector index of Garimpo, the exact one of module 12 and the HNSW of module
+// 13.
 //
 // Add keeps v as the vector of the chunk id. It fails, and keeps nothing, with an error
 // that wraps ErrZeroChunk for the zero ChunkID, ErrWrongDimension for a vector without the
@@ -43,5 +44,25 @@ var (
 type VectorIndex interface {
 	Add(id shared.ChunkID, v shared.Vector) error
 	Search(ctx context.Context, q shared.Vector, k int) ([]retrieval.Hit, error)
+	Len() int
+}
+
+// KeywordIndex keeps the terms of the chunks' texts and finds the chunks whose terms best
+// match the terms of a query: the port to the keyword index of the hybrid search (BM25).
+//
+// Add keeps text as the text of the chunk id. It fails, and keeps nothing, with an error
+// that wraps ErrZeroChunk for the zero ChunkID and ErrDuplicateChunk for a chunk the index
+// already has.
+//
+// Search returns at most k hits, best first in the order of retrieval.Compare: the chunks
+// that hold at least one term of the query, each with its score. A query with no term has
+// no hits. It fails with an error that wraps ErrInvalidK when k is below 1, and ctx's
+// error when ctx is done before the search starts.
+//
+// Len returns how many chunks the index keeps. Add, Search and Len are safe for concurrent
+// calls.
+type KeywordIndex interface {
+	Add(id shared.ChunkID, text string) error
+	Search(ctx context.Context, query string, k int) ([]retrieval.Hit, error)
 	Len() int
 }
