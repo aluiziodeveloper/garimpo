@@ -66,3 +66,10 @@ func TestNaivePassesTheContract(t *testing.T) {
 		return &naive{dim: dim, m: make(map[shared.ChunkID]shared.Vector)}
 	})
 }
+
+// An exact index passes the approximate contract too, even asked for a recall of 1.
+func TestNaivePassesTheApproximateContract(t *testing.T) {
+	ApproximateContract(t, 1, func(_ *testing.T, dim int) search.VectorIndex {
+		return &naive{dim: dim, m: make(map[shared.ChunkID]shared.Vector)}
+	})
+}
