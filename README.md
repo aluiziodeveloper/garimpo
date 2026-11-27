@@ -276,6 +276,23 @@ whole file alive: 1,000 such texts held 108.7 MiB, against 0.65 MiB for copies.
 BENCH_CPUSET=2,4,6,8,10,12,14,16 docker compose run --rm bench sh -c 'GARIMPO_CORPUS=/usr/local/go/src go test -run TestStoreOnTheCorpus -v ./internal/adapters/chunktext'
 ```
 
+## Searching by keyword
+
+A vector finds chunks that mean what the query means; a name the model never learned, such
+as `WriteString` or `EOF`, is found better by its terms. `bm25.Index` is an inverted index
+of the terms of the chunks, their runs of letters and digits in lower case, ranked by BM25
+(`K1` 1.2, `B` 0.75). On the corpus (41,980 chunks), 8 virtual CPUs, 2026-11-27:
+
+| | |
+|---|---|
+| Build | 417 ms of `Add` |
+| Heap after a GC | 53.2 MiB |
+| 1,000 searches of 3 terms | p50 454 µs, p99 2.27 ms, 558.3 KiB allocated per search |
+
+```bash
+BENCH_CPUSET=2,4,6,8,10,12,14,16 docker compose run --rm bench sh -c 'GARIMPO_CORPUS=/usr/local/go/src go test -run TestIndexOnTheCorpus -v ./internal/adapters/bm25'
+```
+
 ## Checks
 
 The same commands run in CI on every pull request:
