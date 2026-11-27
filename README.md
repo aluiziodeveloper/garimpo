@@ -285,9 +285,9 @@ of the terms of the chunks, their runs of letters and digits in lower case, rank
 
 | | |
 |---|---|
-| Build | 416 ms of `Add` |
+| Build | 399 to 437 ms of `Add` |
 | Heap after a GC | 29.5 MiB |
-| 1,000 searches of 3 terms | p50 448 µs, p99 2.035 ms, 558.5 KiB allocated per search |
+| 1,000 searches of 3 terms | p50 126 to 133 µs, p99 488 to 525 µs, 1.8 KiB allocated per search |
 
 The heap was 53.2 MiB at first: each key of the map of postings was a substring of a
 chunk's text (`strings.ToLower` returns its argument when it is already in lower case), and
@@ -303,6 +303,21 @@ behind a pointer. Interning the terms with `unique.Make` also freed the texts, a
 | `strings.Clone` of a new term, stored again on every `Add` | 52.0 to 52.1 MiB | 438 to 444 ms |
 | `unique.Handle[string]` | 45.7 MiB | 725 to 751 ms |
 | `strings.Clone` of a new term, stored once | 29.5 MiB | 417 to 427 ms |
+
+A search summed the scores in a map that it made and grew every time: 558 KiB allocated
+per search, almost all of it on the line that adds to the map (`pprof -list Search`). It now
+sums them in a slice with a place for every chunk, and keeps the slice, with the list of the
+chunks it touched, in a `sync.Pool`: the next search finds it with every score back at 0
+(3 interleaved runs each):
+
+| Scores of a search | p50 | p99 | Allocated per search |
+|---|---|---|---|
+| A map, new for every search | 454 to 493 µs | 2.068 to 2.326 ms | 557.5 to 557.9 KiB |
+| A slice for every chunk, new for every search | 186 to 197 µs | 745 to 965 µs | 496.6 KiB |
+| A slice for every chunk, from a `sync.Pool` | 124 to 133 µs | 488 to 525 µs | 1.8 KiB |
+
+The pool keeps a slice of 8 bytes a chunk, plus a quarter for the index to grow, for each
+search under way at once: 410 KiB on the corpus.
 
 ```bash
 BENCH_CPUSET=2,4,6,8,10,12,14,16 docker compose run --rm bench sh -c 'GARIMPO_CORPUS=/usr/local/go/src go test -run TestIndexOnTheCorpus -v ./internal/adapters/bm25'

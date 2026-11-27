@@ -82,6 +82,37 @@ type Index struct {
 	// text alive. The value is a pointer so that adding a posting never stores the key again,
 	// which, for a string key, would replace the copy with the substring.
 	postings map[string]*[]posting
+
+	scratch sync.Pool // of *scratch: what a search computes the scores in, reused
+}
+
+// scratch is what a search computes the scores in. scores has a place for every chunk, at
+// 0 but for the chunks in touched, which the search gave a score; the search puts every
+// one back at 0 before it returns the scratch to the pool.
+type scratch struct {
+	scores  []float64
+	touched []int32
+}
+
+// getScratch returns a scratch with room for n chunks, every score at 0.
+func (x *Index) getScratch(n int) *scratch {
+	s, _ := x.scratch.Get().(*scratch)
+	if s == nil {
+		s = new(scratch)
+	}
+	if len(s.scores) < n {
+		s.scores = make([]float64, n+n/4) // the index grows: room for a quarter more
+	}
+	return s
+}
+
+// putScratch puts the scores s touched back at 0, and s in the pool.
+func (x *Index) putScratch(s *scratch) {
+	for _, c := range s.touched {
+		s.scores[c] = 0
+	}
+	s.touched = s.touched[:0]
+	x.scratch.Put(s)
 }
 
 var _ search.KeywordIndex = (*Index)(nil)
@@ -144,7 +175,9 @@ func (x *Index) Search(ctx context.Context, query string, k int) ([]retrieval.Hi
 	}
 	n := float64(len(x.ids))
 	avg := float64(x.total) / n
-	scores := make(map[int32]float64)
+	sc := x.getScratch(len(x.ids))
+	defer x.putScratch(sc)
+	scores := sc.scores
 	for _, term := range terms {
 		p := x.postings[term]
 		if p == nil {
@@ -156,12 +189,15 @@ func (x *Index) Search(ctx context.Context, query string, k int) ([]retrieval.Hi
 		for _, p := range ps {
 			tf := float64(p.count)
 			norm := K1 * (1 - B + B*float64(x.lengths[p.chunk])/avg)
+			if scores[p.chunk] == 0 { // its first term: every term adds more than 0
+				sc.touched = append(sc.touched, p.chunk)
+			}
 			scores[p.chunk] += idf * tf * (K1 + 1) / (tf + norm)
 		}
 	}
-	best := topk.New(min(k, max(1, len(scores))), retrieval.Compare)
-	for c, s := range scores {
-		best.Offer(retrieval.Hit{Chunk: x.ids[c], Score: float32(s)})
+	best := topk.New(min(k, max(1, len(sc.touched))), retrieval.Compare)
+	for _, c := range sc.touched {
+		best.Offer(retrieval.Hit{Chunk: x.ids[c], Score: float32(scores[c])})
 	}
 	return best.Sorted(), nil
 }
