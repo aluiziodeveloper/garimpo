@@ -372,7 +372,30 @@ docker compose exec dev sh -c './bin/garimpo serve -vectors /src/.bs/corpus-chun
 ```
 
 On the corpus (2026-11-27), the server loads 41,980 chunks, 39,244 with vectors, in about
-0.7 s. The ingestion with `-vectors` took 23m37s (module 13's, which kept the vectors
+0.7 s.
+
+`TestServeOnTheCorpus` measures the server on the corpus with the real model: 100 requests
+at once, all equal and then all different, with `-collapse` (the default) and without. A
+proxy in front of Ollama counts the calls to the model. It skips without the corpus, as in
+CI:
+
+```bash
+BENCH_CPUSET=2,4,6,8,10,12,14,16 docker compose run --rm bench sh -c 'GARIMPO_VECTORS=/src/.bs/corpus-chunks.vec GARIMPO_CORPUS=/usr/local/go/src go test -count=1 -run TestServeOnTheCorpus -v ./cmd/garimpo'
+```
+
+Two runs, 8 virtual CPUs for the test and 4 for Ollama, 2026-11-27:
+
+| `-collapse` | 100 at once | All in | Each, p50 | Each, p99 | Calls to the model |
+|---|---|---|---|---|---|
+| `false` | equal | 1.498 s, 1.547 s | 799 ms, 885 ms | 1.494 s, 1.547 s | 100 |
+| `true` | equal | 13 ms, 14 ms | 12 ms, 13 ms | 13 ms, 14 ms | 1 |
+| `false` | different | 1.399 s, 1.58 s | 711 ms, 709 ms | 1.398 s, 1.58 s | 100 |
+| `true` | different | 1.398 s, 1.702 s | 797 ms, 905 ms | 1.397 s, 1.698 s | 100 |
+
+All 800 requests answered 200. Equal searches cost one search; different ones cost what they
+cost without it. `encoding/json/v2` changed the bytes, not the time: it writes a response as
+fast as v1 (`labs/jsonv2`), and the `<`, `>` and `&` of the code go out as one byte each, not
+six. The ingestion with `-vectors` took 23m37s (module 13's, which kept the vectors
 without their IDs, 22m48s).
 
 ## Checks

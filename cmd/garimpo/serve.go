@@ -41,6 +41,7 @@ func serve(ctx context.Context, args []string, out io.Writer) error {
 	model := fl.String("model", "all-minilm:22m", "the embedding model, the one of the ingestion")
 	dim := fl.Int("dim", 384, "the dimension of the model's vectors")
 	ctxTokens := fl.Int("context", 512, "the model's context in tokens")
+	collapse := fl.Bool("collapse", true, "run one search for the equal ones at once (INC-16); false runs each, to measure the difference")
 	if err := fl.Parse(args); err != nil {
 		return err
 	}
@@ -61,16 +62,17 @@ func serve(ctx context.Context, args []string, out io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("serve: %w", err)
 	}
-	// Equal searches at once run one search (INC-16), which lasts at most what a request
-	// has to answer: past it, nobody that started with it is still waiting.
-	searcher := &search.Searcher{
-		Ranker: search.Collapse(&search.Hybrid{
-			Embedder: &ollama.Embedder{URL: *url, Model: *model, Dim: *dim, Context: *ctxTokens},
-			Vectors:  vectors,
-			Keywords: keywords,
-		}, *timeout),
-		Texts: storeTexts{texts},
+	var ranker search.Ranker = &search.Hybrid{
+		Embedder: &ollama.Embedder{URL: *url, Model: *model, Dim: *dim, Context: *ctxTokens},
+		Vectors:  vectors,
+		Keywords: keywords,
 	}
+	if *collapse {
+		// Equal searches at once run one search (INC-16), which lasts at most what a request
+		// has to answer: past it, nobody that started with it is still waiting.
+		ranker = search.Collapse(ranker, *timeout)
+	}
+	searcher := &search.Searcher{Ranker: ranker, Texts: storeTexts{texts}}
 	ln, err := net.Listen("tcp", *addr)
 	if err != nil {
 		return fmt.Errorf("serve: %w", err)
