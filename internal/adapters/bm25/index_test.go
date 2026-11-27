@@ -5,9 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"runtime"
 	"slices"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
+	"unsafe"
 
 	"github.com/aluiziodeveloper/garimpo/internal/adapters/bm25"
 	"github.com/aluiziodeveloper/garimpo/internal/app/search"
@@ -149,6 +154,33 @@ func TestSearchKeepsTheKBestInOrder(t *testing.T) {
 	}
 	if !slices.IsSortedFunc(hits, retrieval.Compare) {
 		t.Errorf("hits %v are not in the order of retrieval.Compare", hits)
+	}
+}
+
+// The index keeps the terms, not the texts they came from: once the caller drops a text,
+// the GC frees it. A term that is a substring of a text would keep all of it alive: the
+// first text with the term, or, if the map stores the key again, the last one.
+func TestAddKeepsNoReferenceToTheText(t *testing.T) {
+	x := bm25.New()
+	var freed [2]atomic.Bool
+	func() {
+		for i := range freed {
+			text := strings.Repeat("lowercase terms of a chunk ", 1000) // already in lower case
+			runtime.AddCleanup(unsafe.StringData(text), func(f *atomic.Bool) { f.Store(true) }, &freed[i])
+			if err := x.Add(chunk(t, i), text); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}()
+	for start := time.Now(); !freed[0].Load() || !freed[1].Load(); runtime.GC() {
+		if time.Since(start) > 2*time.Second {
+			t.Fatalf("2 s after the Adds, with only the index holding anything: text 0 freed %v, text 1 freed %v",
+				freed[0].Load(), freed[1].Load())
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if got := chunks(t, find(t, x, "chunk", 2), 2); len(got) != 2 {
+		t.Errorf("after the texts were freed, chunks for chunk = %v, want both", got)
 	}
 }
 

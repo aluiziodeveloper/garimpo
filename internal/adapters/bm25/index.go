@@ -72,19 +72,23 @@ type posting struct {
 
 // Index is an inverted index of the chunks' texts, safe for concurrent calls.
 type Index struct {
-	mu       sync.RWMutex
-	ids      []shared.ChunkID // the chunks, in the order they were added
-	lengths  []int32          // the terms of each chunk
-	total    int64            // the terms of all the chunks
-	has      map[shared.ChunkID]bool
-	postings map[string][]posting
+	mu      sync.RWMutex
+	ids     []shared.ChunkID // the chunks, in the order they were added
+	lengths []int32          // the terms of each chunk
+	total   int64            // the terms of all the chunks
+	has     map[shared.ChunkID]bool
+	// postings maps each term to the chunks that hold it. Its key is a copy of the term,
+	// stored once, when the term is new: a substring of a chunk's text would keep the whole
+	// text alive. The value is a pointer so that adding a posting never stores the key again,
+	// which, for a string key, would replace the copy with the substring.
+	postings map[string]*[]posting
 }
 
 var _ search.KeywordIndex = (*Index)(nil)
 
 // New returns an empty index.
 func New() *Index {
-	return &Index{has: make(map[shared.ChunkID]bool), postings: make(map[string][]posting)}
+	return &Index{has: make(map[shared.ChunkID]bool), postings: make(map[string]*[]posting)}
 }
 
 // Add keeps the terms of text as the terms of chunk id.
@@ -109,7 +113,12 @@ func (x *Index) Add(id shared.ChunkID, text string) error {
 	x.total += int64(n)
 	x.has[id] = true
 	for term, count := range counts {
-		x.postings[term] = append(x.postings[term], posting{chunk: c, count: count})
+		ps := x.postings[term]
+		if ps == nil {
+			ps = new([]posting)
+			x.postings[strings.Clone(term)] = ps // the one store of the key
+		}
+		*ps = append(*ps, posting{chunk: c, count: count})
 	}
 	return nil
 }
@@ -137,10 +146,11 @@ func (x *Index) Search(ctx context.Context, query string, k int) ([]retrieval.Hi
 	avg := float64(x.total) / n
 	scores := make(map[int32]float64)
 	for _, term := range terms {
-		ps := x.postings[term]
-		if len(ps) == 0 {
+		p := x.postings[term]
+		if p == nil {
 			continue
 		}
+		ps := *p
 		df := float64(len(ps))
 		idf := math.Log(1 + (n-df+0.5)/(df+0.5))
 		for _, p := range ps {

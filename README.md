@@ -285,9 +285,24 @@ of the terms of the chunks, their runs of letters and digits in lower case, rank
 
 | | |
 |---|---|
-| Build | 417 ms of `Add` |
-| Heap after a GC | 53.2 MiB |
-| 1,000 searches of 3 terms | p50 454 µs, p99 2.27 ms, 558.3 KiB allocated per search |
+| Build | 416 ms of `Add` |
+| Heap after a GC | 29.5 MiB |
+| 1,000 searches of 3 terms | p50 448 µs, p99 2.035 ms, 558.5 KiB allocated per search |
+
+The heap was 53.2 MiB at first: each key of the map of postings was a substring of a
+chunk's text (`strings.ToLower` returns its argument when it is already in lower case), and
+kept the whole text alive. Storing a string key again, as `m[k] = append(m[k], p)` does,
+replaces the key with the new string: the map keeps the substring of the last text with the
+term. The index now stores a copy of each term once, when it is new, and keeps its postings
+behind a pointer. Interning the terms with `unique.Make` also freed the texts, and cost more
+(3 interleaved runs each):
+
+| Keys of the postings | Heap after a GC | Build |
+|---|---|---|
+| Substrings of the texts | 53.2 MiB | 421 to 424 ms |
+| `strings.Clone` of a new term, stored again on every `Add` | 52.0 to 52.1 MiB | 438 to 444 ms |
+| `unique.Handle[string]` | 45.7 MiB | 725 to 751 ms |
+| `strings.Clone` of a new term, stored once | 29.5 MiB | 417 to 427 ms |
 
 ```bash
 BENCH_CPUSET=2,4,6,8,10,12,14,16 docker compose run --rm bench sh -c 'GARIMPO_CORPUS=/usr/local/go/src go test -run TestIndexOnTheCorpus -v ./internal/adapters/bm25'
