@@ -112,6 +112,33 @@ ingestion. `-adaptive` is off by default until then.
 docker compose run --rm bench go test -run '^$' -bench Adaptive -benchtime 1x -count 6 ./cmd/garimpo
 ```
 
+## Recall on the corpus
+
+`-vectors` writes the vector of every chunk the ingestion embeds to a file
+(`internal/adapters/vectorfile`). The HNSW index (`internal/adapters/hnsw`) is measured on
+it against the exact index (`internal/adapters/flatindex`): the share of the 10 best of each
+query that the graph finds, recall@10. Without `GARIMPO_VECTORS`, the test skips, as in CI:
+
+```bash
+docker compose exec dev go run ./cmd/garimpo ingest -vectors /src/.bs/corpus.vec
+BENCH_CPUSET=2,4,6,8,10,12,14,16 docker compose run --rm -e GARIMPO_VECTORS=/src/.bs/corpus.vec bench go test -count=1 -run TestRecallOnTheCorpus -v ./internal/adapters/hnsw
+```
+
+The whole corpus took 22m48s and gave 39,244 vectors (2,736 chunks are over the model's
+context). The last 500 are the queries, outside the index; the graph holds the other 38,744,
+built with `M` 16 and `EfConstruction` 200, on 8 virtual CPUs, 2026-11-26:
+
+| `EfSearch` | recall@10 | Time per search |
+|---|---|---|
+| 10 | 0.891 | 168 µs |
+| 32 | 0.960 | 268 µs |
+| 64 (default) | 0.982 | 388 µs |
+| 128 | 0.995 | 611 µs |
+| 256 | 0.998 | 1.01 ms |
+
+The exact index took 5.922 ms per search. The default `EfSearch` reaches the 0.95 of RNF04
+at 15 times the speed of the exact index; the test fails below it.
+
 ## Checks
 
 The same commands run in CI on every pull request:

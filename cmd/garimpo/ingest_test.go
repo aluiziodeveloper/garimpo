@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/aluiziodeveloper/garimpo/internal/adapters/journal"
+	"github.com/aluiziodeveloper/garimpo/internal/adapters/vectorfile"
 	"github.com/aluiziodeveloper/garimpo/internal/domain/ingestion"
 )
 
@@ -69,6 +70,25 @@ func TestIngestEmbedsTheCorpus(t *testing.T) {
 	want := "completed documents=2 chunks=2 embedded=2 failed=0 pending=0 skipped=0 in "
 	if got := out.String(); !strings.HasPrefix(got, want) {
 		t.Errorf("ingest output = %q, want it to start with %q", got, want)
+	}
+}
+
+// With -vectors, ingest writes the vector of every chunk it embeds to the file.
+func TestIngestWritesTheVectors(t *testing.T) {
+	dir := corpusOf(t, map[string]string{"a.go": "package a\n", "b/b.go": "package b\n", "c.go": "package c\n"})
+	srv := httptest.NewServer(new(fourDims))
+	defer srv.Close()
+	path := filepath.Join(t.TempDir(), "corpus.vec")
+
+	if err := run([]string{"ingest", "-corpus", dir, "-ollama", srv.URL, "-dim", "4", "-vectors", path}, &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	vs, err := vectorfile.Read(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(vs) != 3 || vs[0].Dim() != 4 {
+		t.Fatalf("the file has %d vectors, want 3 of 4 dimensions", len(vs))
 	}
 }
 

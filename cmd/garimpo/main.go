@@ -17,6 +17,7 @@ import (
 	"github.com/aluiziodeveloper/garimpo/internal/adapters/corpus"
 	"github.com/aluiziodeveloper/garimpo/internal/adapters/journal"
 	"github.com/aluiziodeveloper/garimpo/internal/adapters/ollama"
+	"github.com/aluiziodeveloper/garimpo/internal/adapters/vectorfile"
 	ingest "github.com/aluiziodeveloper/garimpo/internal/app/ingestion"
 	"github.com/aluiziodeveloper/garimpo/internal/app/limiter"
 	"github.com/aluiziodeveloper/garimpo/internal/domain/ingestion"
@@ -85,6 +86,7 @@ func ingestCorpus(args []string, out io.Writer) error {
 	wait := fl.Duration("batch-wait", 10*time.Millisecond, "how long a batch waits to fill up")
 	adaptive := fl.Bool("adaptive", false, "move the calls to the model at the same time with their latency, up to -workers (RN04)")
 	journalPath := fl.String("journal", "", "the file of the run's events; a run stopped midway resumes from it (RN02)")
+	vectorsPath := fl.String("vectors", "", "a file to write the vectors to, to measure an index on them; created anew, so a resumed run writes only the chunks it embeds")
 	if err := fl.Parse(args); err != nil {
 		return err
 	}
@@ -133,6 +135,14 @@ func ingestCorpus(args []string, out io.Writer) error {
 		}
 		cfg.Limiter = l
 	}
+	// The last thing before the run: from here on, every path closes the file of vectors.
+	var vectors *vectorfile.Writer
+	if *vectorsPath != "" {
+		if vectors, err = vectorfile.Create(*vectorsPath, *dim); err != nil {
+			return fmt.Errorf("ingest: %w", err)
+		}
+		cfg.Embedder = vectorfile.Record(cfg.Embedder, vectors)
+	}
 	// SIGINT (Ctrl+C) and SIGTERM (docker stop, kill) stop the run: it drains and pauses.
 	// After the first signal, the default comes back, and a second one ends the process.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -151,5 +161,9 @@ func ingestCorpus(args []string, out io.Writer) error {
 		note = fmt.Sprintf(" (adaptive limit %d of %d)", cfg.Limiter.Limit(), *workers) + note
 	}
 	_, perr := fmt.Fprintf(out, "%s %s in %s%s\n", run.State(), progress.Snapshot(), time.Since(start).Round(time.Millisecond), note)
-	return errors.Join(err, perr)
+	var cerr error
+	if vectors != nil {
+		cerr = vectors.Close()
+	}
+	return errors.Join(err, perr, cerr)
 }
