@@ -61,12 +61,14 @@ func serve(ctx context.Context, args []string, out io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("serve: %w", err)
 	}
+	// Equal searches at once run one search (INC-16), which lasts at most what a request
+	// has to answer: past it, nobody that started with it is still waiting.
 	searcher := &search.Searcher{
-		Ranker: &search.Hybrid{
+		Ranker: search.Collapse(&search.Hybrid{
 			Embedder: &ollama.Embedder{URL: *url, Model: *model, Dim: *dim, Context: *ctxTokens},
 			Vectors:  vectors,
 			Keywords: keywords,
-		},
+		}, *timeout),
 		Texts: storeTexts{texts},
 	}
 	ln, err := net.Listen("tcp", *addr)
