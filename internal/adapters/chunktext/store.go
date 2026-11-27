@@ -13,7 +13,6 @@ import (
 	"io"
 	"io/fs"
 	"runtime"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"weak"
@@ -158,7 +157,7 @@ func readAt(fsys fs.FS, p place) (string, error) {
 	if p.offset+p.length > len(b) {
 		return "", fmt.Errorf("%w: %s:%d-%d is past the end of the file", ErrChangedChunk, p.path, p.start, p.end)
 	}
-	return strings.Clone(string(b[p.offset : p.offset+p.length])), nil
+	return string(b[p.offset : p.offset+p.length]), nil // a copy of only these bytes
 }
 
 // entry is what the cleanup of a text needs to find it in the store.

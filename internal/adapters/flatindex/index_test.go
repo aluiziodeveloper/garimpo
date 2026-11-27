@@ -158,7 +158,6 @@ func BenchmarkShardedSearchParallel(b *testing.B) {
 	}
 }
 
-// filled adds corpus random vectors to idx and returns it with a random query.
 // BenchmarkSearchPublished is BenchmarkSearch on the index that publishes snapshots.
 func BenchmarkSearchPublished(b *testing.B) {
 	idx, q := filled(b, flatindex.NewPublished(dim))
@@ -169,6 +168,7 @@ func BenchmarkSearchPublished(b *testing.B) {
 	}
 }
 
+// filled adds corpus random vectors to idx and returns it with a random query.
 func filled(b *testing.B, idx search.VectorIndex) (search.VectorIndex, shared.Vector) {
 	b.Helper()
 	r := rand.New(rand.NewPCG(1, 2))

@@ -42,7 +42,7 @@ type Chunk struct {
 	text       string
 }
 
-// ID returns the ID of the chunk: the hash of its path, lines and text.
+// ID returns the ID of the chunk: the hash of its path, byte offset, lines and text.
 func (c Chunk) ID() shared.ChunkID { return c.id }
 
 // Path returns the path of the document the chunk was cut from.
