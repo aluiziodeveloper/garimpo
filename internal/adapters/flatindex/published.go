@@ -66,7 +66,8 @@ func (x *Published) Add(id shared.ChunkID, v shared.Vector) error {
 }
 
 // Snapshot returns the last version published: a search of it never changes, however many
-// Adds come after.
+// Adds come after. It is for reading only: it shares its arrays with the index, and a With
+// on it, while an Add runs, would break the rule of one caller at a time of With.
 func (x *Published) Snapshot() indexing.IndexSnapshot {
 	return *x.cur.Load()
 }

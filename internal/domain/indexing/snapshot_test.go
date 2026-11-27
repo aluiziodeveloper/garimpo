@@ -95,6 +95,16 @@ func TestWithLeavesTheSnapshotAsItWas(t *testing.T) {
 	}
 }
 
+// The zero IndexSnapshot is not an index: it has no dimension, and With refuses to add to
+// it instead of panicking. An index starts from Empty.
+func TestTheZeroSnapshotTakesNothing(t *testing.T) {
+	var zero indexing.IndexSnapshot
+	if _, err := zero.With(chunk(t, 1), shared.Vector{}); !errors.Is(err, indexing.ErrWrongDimension) {
+		t.Errorf("With on the zero snapshot: err = %v, want one that wraps %v", err, indexing.ErrWrongDimension)
+	}
+	holds(t, zero)
+}
+
 func TestWithRefusesWhatTheSnapshotCannotHold(t *testing.T) {
 	s := empty(t)
 	if _, err := s.With(shared.ChunkID{}, vector(t, 1)); !errors.Is(err, indexing.ErrZeroChunk) {

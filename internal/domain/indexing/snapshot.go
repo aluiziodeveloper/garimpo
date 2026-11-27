@@ -81,10 +81,13 @@ func (s IndexSnapshot) Scores(q shared.Vector) iter.Seq2[shared.ChunkID, float32
 }
 
 // With returns the next version: this snapshot with the chunk id and its vector v at the
-// end. It fails, and returns nothing, for the zero ChunkID or a vector without the
-// snapshot's dimension. Telling a chunk already held is the index's job.
+// end. It fails, and returns nothing, on the zero IndexSnapshot, for the zero ChunkID or for
+// a vector without the snapshot's dimension. Telling a chunk already held is the index's
+// job.
 func (s IndexSnapshot) With(id shared.ChunkID, v shared.Vector) (IndexSnapshot, error) {
 	switch {
+	case s.dim == 0:
+		return IndexSnapshot{}, fmt.Errorf("%w: the zero snapshot holds no index; start from Empty", ErrWrongDimension)
 	case id.IsZero():
 		return IndexSnapshot{}, ErrZeroChunk
 	case v.Dim() != s.dim:
