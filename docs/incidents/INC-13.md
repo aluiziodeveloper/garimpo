@@ -75,9 +75,12 @@ A wider search did not help: from `EfSearch` 128 to 256, the recall moved from 0
 - `TestSetLinksKeepsToTheLimit` checks that a merged list keeps to 2·M on level 0.
 - `TestRecallOnTheCorpus` builds the graph with `GOMAXPROCS` goroutines and fails below
   0.95. It needs the vectors of the corpus (`GARIMPO_VECTORS`) and skips in the CI.
-- The concurrent case of `indextest.ApproximateContract` judges the recall on every vector
-  (600 of the best, PR #98) and no longer on 30: with 30, it failed 3 times in 300 runs on
-  the code with the bug, and once in 100 on the fixed code.
+- Not a regression test: the concurrent case of `indextest.ApproximateContract`. It judges
+  the recall on every vector (600 of the best, PR #98) and no longer on 30: with 30, it
+  failed 3 times in 300 runs on the code with the bug, and once in 100 on the fixed code.
+  With 600 it failed none of 300 runs on the code with the bug: it no longer fails by
+  chance, and it does not catch INC-13 either. The two `setLinks` tests and the corpus test
+  do.
 
 ## Where Garimpo meets it
 
