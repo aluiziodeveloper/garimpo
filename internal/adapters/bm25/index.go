@@ -84,6 +84,7 @@ type Index struct {
 	postings map[string]*[]posting
 
 	scratch sync.Pool // of *scratch: what a search computes the scores in, reused
+	counts  sync.Pool // of map[string]int32: what an Add counts the terms of a text in
 }
 
 // scratch is what a search computes the scores in. scores has a place for every chunk, at
@@ -119,7 +120,9 @@ var _ search.KeywordIndex = (*Index)(nil)
 
 // New returns an empty index.
 func New() *Index {
-	return &Index{has: make(map[shared.ChunkID]bool), postings: make(map[string]*[]posting)}
+	x := &Index{has: make(map[shared.ChunkID]bool), postings: make(map[string]*[]posting)}
+	x.counts.New = func() any { return make(map[string]int32) } // a map is a pointer: no box
+	return x
 }
 
 // Add keeps the terms of text as the terms of chunk id.
@@ -127,7 +130,11 @@ func (x *Index) Add(id shared.ChunkID, text string) error {
 	if id.IsZero() {
 		return search.ErrZeroChunk
 	}
-	counts := make(map[string]int32)
+	counts := x.counts.Get().(map[string]int32)
+	defer func() {
+		clear(counts) // its keys are substrings of text: none may stay in the pool
+		x.counts.Put(counts)
+	}()
 	n := int32(0)
 	for term := range Terms(text) {
 		counts[term]++
