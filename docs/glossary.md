@@ -66,6 +66,14 @@ the lessons use the Portuguese word in parentheses.
 | **heap** | The data structure, not the memory: a binary tree in a slice where every parent ranks before its children, so the root is the first. A heap of k with the worst at the root keeps the top k: a score better than the root replaces it in log₂(k) comparisons (`topk.Keeper`) | 12-04 |
 | **shard** | One part of an index that holds some of the vectors and is searched on its own. In `flatindex.Sharded`, a hash of the `ChunkID` picks the shard | 12-07 |
 | **scatter-gather** | Sending one request to every shard at once (scatter) and merging their answers (gather). It lowers the latency of a request while there are idle CPUs, and adds nothing to the throughput when there are none (lesson 12-08) | 12-07 |
+| **approximate index** (índice aproximado) | An index that answers from part of the vectors and may miss some of the k best: `hnsw`. It is judged by its recall against the exact index | 13-01 |
+| **HNSW** | Hierarchical Navigable Small World: a graph in levels, few nodes on top and every node on level 0, each linked to near ones. A search walks greedily from the top and widens on level 0 (`internal/adapters/hnsw`) | 13-01 |
+| **level** (nível) | One layer of the HNSW graph. A node reaches level l with probability M^-l: with M of 16, one node in 16 is on level 1 and one in 256 on level 2 | 13-02 |
+| **entry point** (ponto de entrada) | The node of the top level where every search and every insert starts | 13-02 |
+| **greedy search** (busca gulosa) | Moving to the neighbor closest to the query until none is closer: the descent of HNSW above level 0 | 13-02 |
+| **`M`, `EfConstruction`, `EfSearch`** | The knobs of HNSW: the links per node (2·M on level 0), the candidates an insert considers, and the candidates a search keeps on level 0. Garimpo uses 16, 200 and 64 | 13-02 |
+| **recall@k** | The share of the k best by the exact index that an approximate index returns, over a set of queries. RNF04 asks for 0.95 at k = 10 | 13-05 |
+| **lock per node** (trava por nó) | A lock in each node of a structure for what only that node holds, here its links: two goroutines wait for each other only on the same node | 13-06 |
 
 ## Go and runtime
 
@@ -133,6 +141,8 @@ the lessons use the Portuguese word in parentheses.
 | **memory-bound** (preso à memória) | A loop whose pace is set by how fast the data come from memory, not by the arithmetic. The exact search over the whole corpus reads 64 MB per query, more than the 24 MiB of L3: SIMD took 44% off a search that fits in the cache and 20% off this one | 11-09 |
 | **`container/heap`** | The standard library's heap, on any type that implements `heap.Interface` (`Len`, `Less`, `Swap`, `Push`, `Pop`). `heap.Push` and `heap.Pop` pass the values as `any`, which may allocate; `heap.Init` and `heap.Fix` move values already in the slice and do not | 12-05 |
 | **`hash/maphash`** | A fast, seeded hash of strings, bytes and, since Go 1.24, any comparable value (`maphash.Comparable`). Not for cryptography; the seed changes from one process to the next | 12-07 |
+| **lock contention** (disputa de trava) | Goroutines that want the same lock at once, or touch the same counter of a lock: the time grows with them. An `RWMutex` read lock that never waits still adds to one counter of readers, and its cache line moves from core to core | 13-09 |
+| **mutex profile, block profile** | `-mutexprofile` records where goroutines waited for a lock, charged to the `Unlock` that let them go; `-blockprofile`, where they blocked on locks and channels. Neither shows the cost of a lock nobody waits for: the CPU profile does | 13-11 |
 
 ## Infrastructure
 

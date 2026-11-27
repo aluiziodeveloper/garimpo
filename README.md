@@ -177,6 +177,8 @@ the node's lock. `setLinks` now merges the links and prunes them. The recall on 
 | 256 | 0.959 | 0.997 | 0.998 |
 
 A wider search did not bring the lost links back: overwriting, the recall stopped at 0.959.
+In 5 interleaved runs with 8 goroutines, overwriting gave 0.904 to 0.949 at the default
+`EfSearch` (the test failed in all 5), and merging 0.969 to 0.978.
 
 Eight goroutines were still slower than four. The CPU profile of the build by 8 goroutines
 put 47% of the time in `sync/atomic.(*Int32).Add`, inside the `RLock` that looked each
@@ -193,9 +195,10 @@ a lock. The same benchmark, 6 runs each, interleaved, on 8 virtual CPUs, 2026-11
 | 8 | 2.254 s ± 5% | 0.810 s ± 3% | -64.07% (p=0.002) |
 
 Eight goroutines now build 4.9 times as fast as one, and the CPU profile puts 78% of the
-time in the dot product. On the corpus, 8 goroutines built the graph in 11.2 s (21.5 s
-before), with a recall@10 of 0.974 at the default `EfSearch`, in one run: a graph built
-concurrently differs from run to run.
+time in the dot product. On the corpus, in 5 interleaved runs with 8 goroutines, the graph
+took 10.6 to 11.3 s to build (21.1 to 29.4 s before), with a recall@10 of 0.973 to 0.982 at
+the default `EfSearch`: a graph built concurrently differs from run to run, so its recall is
+a range.
 
 ```bash
 BENCH_CPUSET=2,4,6,8,10,12,14,16 docker compose run --rm bench sh -c 'go test -c -o /tmp/hnsw.test ./internal/adapters/hnsw &&
