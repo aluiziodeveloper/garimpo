@@ -139,6 +139,29 @@ built with `M` 16 and `EfConstruction` 200, on 8 virtual CPUs, 2026-11-26:
 The exact index took 5.922 ms per search. The default `EfSearch` reaches the 0.95 of RNF04
 at 15 times the speed of the exact index; the test fails below it.
 
+## Building the graph concurrently
+
+`Add` calls run at the same time: the index lock is taken alone only to put a new node in
+the list, and each node has a lock of its own for its links. `BenchmarkBuild` measures the
+build of 2,000 random vectors of 384 dimensions, one lock for the whole graph (the code of
+`aula-13-05`) against a lock per node, 6 runs each, interleaved, on 8 virtual CPUs,
+2026-11-26:
+
+| Goroutines | One lock | A lock per node | |
+|---|---|---|---|
+| 1 | 3.666 s ± 3% | 3.964 s ± 3% | +8.13% (p=0.002) |
+| 2 | 3.671 s ± 4% | 2.647 s ± 6% | -27.89% (p=0.002) |
+| 4 | 3.578 s ± 5% | 2.045 s ± 16% | -42.84% (p=0.002) |
+| 8 | 3.632 s ± 4% | 2.215 s ± 25% | -39.01% (p=0.002) |
+
+With one lock, more goroutines change nothing: they take turns. With a lock per node, one
+goroutine pays for the locks (8% slower, with 2.1 times the allocations: a walk copies the links
+it reads), and eight goroutines are slower than four.
+
+```bash
+BENCH_CPUSET=2,4,6,8,10,12,14,16 docker compose run --rm bench go test -run '^$' -bench Build -benchmem -count 6 ./internal/adapters/hnsw
+```
+
 ## Checks
 
 The same commands run in CI on every pull request:

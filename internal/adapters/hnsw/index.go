@@ -32,8 +32,11 @@ type Config struct {
 // with probability M^-l, on every level up to l: the levels above 0 are a few long links
 // that a search crosses first, from the entry point, the node of the top level.
 //
-// Add and Search are safe for concurrent calls: one lock guards the whole graph, which an
-// Add takes alone and the searches share.
+// Add and Search are safe for concurrent calls, and Adds run at the same time. mu guards
+// the list of nodes and the entry point, and is held only for a moment: an Add takes it
+// alone to put its node in the list, and a walk shares it to look a node up (node). Each
+// node has a lock of its own for its links, which a walk takes to copy them and an Add to
+// change them.
 type Index struct {
 	dim int
 	cfg Config
@@ -43,15 +46,18 @@ type Index struct {
 	rng   *rand.Rand
 	ids   []shared.ChunkID // the chunk of node i is ids[i]
 	has   map[shared.ChunkID]bool
-	nodes []node
+	nodes []*node
 	entry int32 // the node every search starts from; -1 while the index is empty
 	top   int   // the level of the entry point
 }
 
 // node is a vector and its links: links[l] holds the nodes it points to on level l, so a
-// node of level 2 has three lists.
+// node of level 2 has three lists. The vector never changes after the node is made; mu
+// guards the links.
 type node struct {
-	vec   []float32
+	vec []float32
+
+	mu    sync.Mutex
 	links [][]int32
 }
 
@@ -88,12 +94,30 @@ func (x *Index) Add(id shared.ChunkID, v shared.Vector) error {
 	}
 	values := v.Values()
 	x.mu.Lock()
-	defer x.mu.Unlock()
 	if x.has[id] {
+		x.mu.Unlock()
 		return fmt.Errorf("%w: %s", search.ErrDuplicateChunk, id)
 	}
 	x.has[id] = true
-	x.insert(id, values)
+	n, level := int32(len(x.nodes)), x.randomLevel()
+	x.ids = append(x.ids, id)
+	x.nodes = append(x.nodes, &node{vec: values, links: make([][]int32, level+1)})
+	if x.entry < 0 {
+		x.entry, x.top = n, level
+		x.mu.Unlock()
+		return nil
+	}
+	entry, top := x.entry, x.top
+	x.mu.Unlock()
+
+	x.insert(n, level, entry, top)
+	if level > top {
+		x.mu.Lock()
+		if level > x.top { // another Add may have raised it in the meantime
+			x.entry, x.top = n, level
+		}
+		x.mu.Unlock()
+	}
 	return nil
 }
 
@@ -102,6 +126,15 @@ func (x *Index) Len() int {
 	x.mu.RLock()
 	defer x.mu.RUnlock()
 	return len(x.ids)
+}
+
+// node returns node id. The list of nodes grows under Add, so a walk looks each node up
+// under the lock, shared, and never holds it while it walks: an Add that waits for the
+// lock alone would wait for every walk under way, and stop every walk that starts.
+func (x *Index) node(id int32) *node {
+	x.mu.RLock()
+	defer x.mu.RUnlock()
+	return x.nodes[id]
 }
 
 // randomLevel draws the level of a new node: 0 with probability 1 - 1/M, and each level

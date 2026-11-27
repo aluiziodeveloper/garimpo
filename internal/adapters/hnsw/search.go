@@ -29,18 +29,21 @@ func (x *Index) Search(ctx context.Context, q shared.Vector, k int) ([]retrieval
 	}
 	query := q.Values()
 	x.mu.RLock()
-	defer x.mu.RUnlock()
-	if x.entry < 0 {
+	entry, top := x.entry, x.top
+	x.mu.RUnlock()
+	if entry < 0 {
 		return []retrieval.Hit{}, nil
 	}
-	ep := []candidate{{x.entry, vec.Dot(query, x.nodes[x.entry].vec)}}
-	for l := x.top; l > 0; l-- {
+	ep := []candidate{{entry, vec.Dot(query, x.node(entry).vec)}}
+	for l := top; l > 0; l-- {
 		ep = x.searchLayer(query, ep, 1, l)
 	}
 	found := x.searchLayer(query, ep, max(x.cfg.EfSearch, k), 0)
 	best := topk.New(min(k, len(found)), retrieval.Compare)
+	x.mu.RLock()
 	for _, c := range found {
 		best.Offer(retrieval.Hit{Chunk: x.ids[c.id], Score: c.score})
 	}
+	x.mu.RUnlock()
 	return best.Sorted(), nil
 }
