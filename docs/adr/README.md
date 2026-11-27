@@ -11,3 +11,4 @@ new record supersedes it and the old one says so in its status.
 | [0004](0004-concurrent-hnsw-index.md) | The concurrent HNSW index | Accepted |
 | [0005](0005-snapshot-reads-and-weak-texts.md) | Searches that read snapshots, and texts held by weak pointers | Accepted |
 | [0006](0006-hybrid-search.md) | Hybrid search, BM25 and Reciprocal Rank Fusion | Accepted |
+| [0007](0007-query-server.md) | The query server | Accepted |

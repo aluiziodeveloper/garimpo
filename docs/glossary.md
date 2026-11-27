@@ -34,6 +34,8 @@ the lessons use the Portuguese word in parentheses.
 | **term** (termo) | A run of letters and digits of a text, in lower case, of two characters or more: what the keyword index keeps of a chunk and looks for in a query (`bm25.Terms`) | 15-03 |
 | **keyword search** (busca por palavra-chave) | A search by the terms of the query, ranked by BM25 (`search.KeywordIndex`, `bm25.Index`): it finds a name the model never learned | 15-03 |
 | **hybrid search** (busca híbrida) | A search by vector and by keyword at once, the two rankings fused by RRF (`search.Hybrid`) | 15-09 |
+| **query** (consulta) | What a reader asks: valid UTF-8, no space at the ends, at most 1,000 bytes (`retrieval.Query`). The same query with the same `k` at once is one search (INC-16) | 16-02 |
+| **search result** (resultado) | A hit a reader can open: its citation, its text and its score (`search.Result`). No result goes out without a citation (RN01) | 16-02 |
 
 ## Design
 
@@ -164,6 +166,11 @@ the lessons use the Portuguese word in parentheses.
 | **victim cache** (cache de vítimas) | Where a GC moves what a `sync.Pool` holds; `Get` still finds it there, and the next GC drops it: a pool empties in two cycles. Under `-race`, `Put` drops an object in four on purpose | 15-06 |
 | **map key replacement** (substituição da chave) | Storing to a key a map has, `m[k] = v`, replaces the stored key with `k` when the key type holds a string, a float, a complex or an interface: a copy stored once is lost to the substring of the next text | 15-04 |
 | **cooperative cancellation** (cancelamento cooperativo) | A context stops nothing by itself: it closes `Done` and makes `Err` return an error, and only code that looks at them stops. A long loop of CPU must look (INC-15) | 15-01 |
+| **`encoding/json/v2`** | The second JSON package of the standard library, on by default in Go 1.27 (`GOEXPERIMENT=nojsonv2` turns it off); while it is on, v1 is built on it. Unlike v1: a nil slice is `[]`, `<`, `>` and `&` go out as they are, invalid UTF-8 and duplicate names are errors, and names match in exact case | 16-04 |
+| **`singleflight`** | `golang.org/x/sync/singleflight`: one call per key at a time, whose result the callers that came meanwhile share. Not a cache: the next call after it ended runs again | 16-07 |
+| **`context.WithoutCancel`** | A context with the values of its parent and none of its cancel or deadline: for work that must outlive the caller that started it, such as a shared search, with a deadline of its own | 16-07 |
+| **graceful shutdown** (desligamento gracioso) | `http.Server.Shutdown`: close the listeners, then wait for the requests in flight to answer, up to a deadline | 16-03 |
+| **server timeouts** (prazos do servidor) | `ReadHeaderTimeout`, `ReadTimeout`, `WriteTimeout` and `IdleTimeout` of `http.Server`: how long a connection may take to send a request, to get its response and to sit idle. Without them, a slow client holds a connection forever | 16-03 |
 
 ## Infrastructure
 

@@ -358,7 +358,7 @@ each result, as JSON of `encoding/json/v2`: the code in the texts goes out as it
 without the escapes for HTML of v1, and no results is `[]`. Every search has `-timeout` (2 s by default) to answer, counted from when the
 request arrives: past it, the search is canceled and the answer is 504. A bad query or `k`
 is 400. Equal searches at once, the same query with the same `k`, run one search
-(`search.Collapse`, with `singleflight`): the others wait for it and get its results, and a
+(`search.Collapse`, with `singleflight`; INC-16, ADR 0007): the others wait for it and get its results, and a
 client that leaves does not cancel it for the rest. SIGINT or SIGTERM stops the server: it takes no new request and lets the ones in
 flight answer.
 
