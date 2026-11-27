@@ -62,8 +62,13 @@ func serve(ctx context.Context, args []string, out io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("serve: %w", err)
 	}
+	var embedder search.Embedder = &ollama.Embedder{URL: *url, Model: *model, Dim: *dim, Context: *ctxTokens}
+	if *collapse {
+		// The same query with other ks is the same text for the model: one call.
+		embedder = search.CollapseEmbedder(embedder, *timeout)
+	}
 	var ranker search.Ranker = &search.Hybrid{
-		Embedder: &ollama.Embedder{URL: *url, Model: *model, Dim: *dim, Context: *ctxTokens},
+		Embedder: embedder,
 		Vectors:  vectors,
 		Keywords: keywords,
 	}

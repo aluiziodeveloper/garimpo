@@ -50,6 +50,11 @@ func TestServeOnTheCorpus(t *testing.T) {
 			different = append(different, q+"+"+w)
 		}
 	}
+	// One query with each k from 1 to 50: 50 searches, one text for the model.
+	var ks []string
+	for k := range 50 {
+		ks = append(ks, fmt.Sprintf("sort+a+slice+in+place&k=%d", k+1))
+	}
 	for _, collapse := range []bool{false, true} {
 		var out syncBuffer
 		addr, stop, done := started(t, &out, "-dim", "384", "-corpus", dir, "-vectors", vectors,
@@ -60,10 +65,10 @@ func TestServeOnTheCorpus(t *testing.T) {
 		for _, run := range []struct {
 			name    string
 			queries []string
-		}{{"100 equal", equal}, {"100 different", different}} {
+		}{{"100 equal", equal}, {"100 different", different}, {"1 query, 50 ks", ks}} {
 			before := calls.Load()
 			took, each, statuses := burst(t, addr, run.queries)
-			t.Logf("collapse=%-5t %-13s all in %v; each p50 %v, p99 %v; %v; %d calls to the model",
+			t.Logf("collapse=%-5t %-14s all in %v; each p50 %v, p99 %v; %v; %d calls to the model",
 				collapse, run.name, took.Round(time.Millisecond), each[len(each)/2].Round(time.Millisecond),
 				each[len(each)*99/100].Round(time.Millisecond), statuses, calls.Load()-before)
 		}
