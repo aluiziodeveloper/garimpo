@@ -20,7 +20,8 @@ var (
 	// ErrZeroChunk is wrapped when Add gets the zero ChunkID, which identifies no chunk.
 	ErrZeroChunk = errors.New("zero chunk ID")
 
-	// ErrInvalidK is wrapped when Search is asked for fewer than one hit.
+	// ErrInvalidK is wrapped when Search is asked for fewer than one hit, or, by the use
+	// case, for more than MaxK.
 	ErrInvalidK = errors.New("k must be at least 1")
 )
 
