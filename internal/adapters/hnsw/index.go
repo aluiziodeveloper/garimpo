@@ -9,6 +9,7 @@ import (
 	"math"
 	"math/rand/v2"
 	"sync"
+	"sync/atomic"
 
 	"github.com/aluiziodeveloper/garimpo/internal/app/search"
 	"github.com/aluiziodeveloper/garimpo/internal/domain/shared"
@@ -34,9 +35,9 @@ type Config struct {
 //
 // Add and Search are safe for concurrent calls, and Adds run at the same time. mu guards
 // the list of nodes and the entry point, and is held only for a moment: an Add takes it
-// alone to put its node in the list, and a walk shares it to look a node up (node). Each
-// node has a lock of its own for its links, which a walk takes to copy them and an Add to
-// change them.
+// alone to put its node in the list, and publishes the list in view, which a walk reads
+// to look a node up without a lock (node). Each node has a lock of its own for its links,
+// which a walk takes to copy them and an Add to change them.
 type Index struct {
 	dim int
 	cfg Config
@@ -47,8 +48,9 @@ type Index struct {
 	ids   []shared.ChunkID // the chunk of node i is ids[i]
 	has   map[shared.ChunkID]bool
 	nodes []*node
-	entry int32 // the node every search starts from; -1 while the index is empty
-	top   int   // the level of the entry point
+	view  atomic.Pointer[[]*node] // nodes, as of the last Add
+	entry int32                   // the node every search starts from; -1 while the index is empty
+	top   int                     // the level of the entry point
 }
 
 // node is a vector and its links: links[l] holds the nodes it points to on level l, so a
@@ -102,6 +104,8 @@ func (x *Index) Add(id shared.ChunkID, v shared.Vector) error {
 	n, level := int32(len(x.nodes)), x.randomLevel()
 	x.ids = append(x.ids, id)
 	x.nodes = append(x.nodes, &node{vec: values, links: make([][]int32, level+1)})
+	nodes := x.nodes
+	x.view.Store(&nodes)
 	if x.entry < 0 {
 		x.entry, x.top = n, level
 		x.mu.Unlock()
@@ -128,13 +132,14 @@ func (x *Index) Len() int {
 	return len(x.ids)
 }
 
-// node returns node id. The list of nodes grows under Add, so a walk looks each node up
-// under the lock, shared, and never holds it while it walks: an Add that waits for the
-// lock alone would wait for every walk under way, and stop every walk that starts.
+// node returns node id, from the list that the last Add published, without a lock. A
+// shared lock for each lookup cost half of the CPU of a build by 8 goroutines: a reader
+// that never waits still adds to the counter of readers, the same for every reader, and
+// the cache line of that counter went from core to core (module 13). The list is never
+// changed below its length, only appended to, and a walk learns of a node only from a
+// link or the entry point, written after the Add that published it.
 func (x *Index) node(id int32) *node {
-	x.mu.RLock()
-	defer x.mu.RUnlock()
-	return x.nodes[id]
+	return (*x.view.Load())[id]
 }
 
 // randomLevel draws the level of a new node: 0 with probability 1 - 1/M, and each level

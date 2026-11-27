@@ -178,6 +178,31 @@ the node's lock. `setLinks` now merges the links and prunes them. The recall on 
 
 A wider search did not bring the lost links back: overwriting, the recall stopped at 0.959.
 
+Eight goroutines were still slower than four. The CPU profile of the build by 8 goroutines
+put 47% of the time in `sync/atomic.(*Int32).Add`, inside the `RLock` that looked each
+node up: a reader that never waits still adds to the counter of readers, and all of them
+add to the same one. The mutex profile did not show it, since it counts only waiting. The
+list of nodes is now published in an `atomic.Pointer` by `Add`, and a walk reads it without
+a lock. The same benchmark, 6 runs each, interleaved, on 8 virtual CPUs, 2026-11-27:
+
+| Goroutines | `RLock` for each node | `atomic.Pointer` | |
+|---|---|---|---|
+| 1 | 4.167 s ± 7% | 3.940 s ± 12% | ~ (p=0.310) |
+| 2 | 2.719 s ± 8% | 2.137 s ± 10% | -21.41% (p=0.002) |
+| 4 | 2.089 s ± 13% | 1.216 s ± 16% | -41.81% (p=0.002) |
+| 8 | 2.254 s ± 5% | 0.810 s ± 3% | -64.07% (p=0.002) |
+
+Eight goroutines now build 4.9 times as fast as one, and the CPU profile puts 78% of the
+time in the dot product. On the corpus, 8 goroutines built the graph in 11.2 s (21.5 s
+before), with a recall@10 of 0.974 at the default `EfSearch`, in one run: a graph built
+concurrently differs from run to run.
+
+```bash
+BENCH_CPUSET=2,4,6,8,10,12,14,16 docker compose run --rm bench sh -c 'go test -c -o /tmp/hnsw.test ./internal/adapters/hnsw &&
+    cd /tmp && ./hnsw.test -test.run "^$" -test.bench "Build/workers=8" -test.cpuprofile cpu.out -test.mutexprofile mutex.out &&
+    go tool pprof -top -nodecount 10 hnsw.test cpu.out'
+```
+
 ## Checks
 
 The same commands run in CI on every pull request:
