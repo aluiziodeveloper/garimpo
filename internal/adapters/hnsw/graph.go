@@ -40,15 +40,28 @@ func (x *Index) insert(n int32, level int, entry int32, top int) {
 	for l := min(level, top); l >= 0; l-- {
 		found := x.searchLayer(v, ep, x.cfg.EfConstruction, l)
 		links := x.selectNeighbors(found, x.maxLinks(l))
-		own := x.node(n)
-		own.mu.Lock()
-		own.links[l] = links
-		own.mu.Unlock()
+		x.setLinks(n, l, links)
 		for _, to := range links {
 			x.link(to, n, l)
 		}
 		ep = found
 	}
+}
+
+// setLinks adds links to the links of the new node n on level l, under its lock, and past
+// the limit keeps the ones the heuristic picks. It never overwrites: n is in the graph
+// since Add put it in the list, and an insert that reached it from the level above may
+// already have linked to it on this level (INC-13).
+func (x *Index) setLinks(n int32, l int, links []int32) {
+	own := x.node(n)
+	own.mu.Lock()
+	defer own.mu.Unlock()
+	for _, to := range links {
+		if !slices.Contains(own.links[l], to) {
+			own.links[l] = append(own.links[l], to)
+		}
+	}
+	x.prune(own, l)
 }
 
 // linksOf returns a copy of the links of node id on level l, taken under its lock: the
@@ -67,6 +80,12 @@ func (x *Index) link(from, to int32, l int) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	n.links[l] = append(n.links[l], to)
+	x.prune(n, l)
+}
+
+// prune keeps, of the links of n on level l, the ones the heuristic picks if they are past
+// the limit. The caller holds the lock of n.
+func (x *Index) prune(n *node, l int) {
 	if len(n.links[l]) <= x.maxLinks(l) {
 		return
 	}

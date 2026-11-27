@@ -162,6 +162,22 @@ it reads), and eight goroutines are slower than four.
 BENCH_CPUSET=2,4,6,8,10,12,14,16 docker compose run --rm bench go test -run '^$' -bench Build -benchmem -count 6 ./internal/adapters/hnsw
 ```
 
+Built by 8 goroutines, the graph lost links: a node set its own list after other inserts,
+which had reached it from the level above, had already linked to it there, and the list
+it wrote erased theirs (INC-13). The race detector saw nothing, since every write was under
+the node's lock. `setLinks` now merges the links and prunes them. The recall on the corpus,
+2026-11-27:
+
+| `EfSearch` | 8 goroutines, overwriting | 8 goroutines, merging | 1 goroutine |
+|---|---|---|---|
+| 10 | 0.849 | 0.855 | 0.891 |
+| 32 | 0.923 | 0.951 | 0.960 |
+| 64 (default) | 0.946 | 0.979 | 0.982 |
+| 128 | 0.957 | 0.993 | 0.995 |
+| 256 | 0.959 | 0.997 | 0.998 |
+
+A wider search did not bring the lost links back: overwriting, the recall stopped at 0.959.
+
 ## Checks
 
 The same commands run in CI on every pull request:

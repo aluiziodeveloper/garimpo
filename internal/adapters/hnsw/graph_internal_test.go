@@ -29,8 +29,9 @@ func TestLevelsThinOutByM(t *testing.T) {
 	}
 }
 
-// filled returns an index with n random vectors of dim dimensions, added one at a time.
-func filled(t *testing.T, cfg Config, n, dim int) *Index {
+// filled returns an index with n random vectors of 13 dimensions, added one at a time.
+func filled(t *testing.T, cfg Config, n int) *Index {
+	const dim = 13
 	t.Helper()
 	x := New(dim, cfg)
 	r := rand.New(rand.NewPCG(2, 2))
@@ -45,7 +46,7 @@ func filled(t *testing.T, cfg Config, n, dim int) *Index {
 // A node keeps at most M links on each level above 0 and 2·M on level 0, never a link to
 // itself and never the same link twice: the pruning keeps the graph sparse.
 func TestNoNodeHasMoreLinksThanItMay(t *testing.T) {
-	x := filled(t, Config{M: 4, EfConstruction: 32, Seed: 3}, 2000, 13)
+	x := filled(t, Config{M: 4, EfConstruction: 32, Seed: 3}, 2000)
 	for id, n := range x.nodes {
 		for l, links := range n.links {
 			if limit := x.maxLinks(l); len(links) > limit {
@@ -65,7 +66,7 @@ func TestNoNodeHasMoreLinksThanItMay(t *testing.T) {
 // Every node can be reached from the entry point on level 0, the one that holds them all:
 // a node no link points to is a vector no search can find.
 func TestEveryNodeCanBeReached(t *testing.T) {
-	x := filled(t, Config{M: 4, EfConstruction: 32, Seed: 4}, 2000, 13)
+	x := filled(t, Config{M: 4, EfConstruction: 32, Seed: 4}, 2000)
 	seen := make([]bool, len(x.nodes))
 	seen[x.entry] = true
 	queue := []int32{x.entry}
@@ -89,7 +90,7 @@ func TestEveryNodeCanBeReached(t *testing.T) {
 // The entry point is a node of the top level, and no node goes above it: every search
 // starts at the top.
 func TestTheEntryPointIsOnTheTopLevel(t *testing.T) {
-	x := filled(t, Config{M: 4, EfConstruction: 32, Seed: 5}, 2000, 13)
+	x := filled(t, Config{M: 4, EfConstruction: 32, Seed: 5}, 2000)
 	if top := len(x.nodes[x.entry].links) - 1; top != x.top {
 		t.Fatalf("the entry point has level %d, the index says %d", top, x.top)
 	}
