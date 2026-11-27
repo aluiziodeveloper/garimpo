@@ -28,6 +28,33 @@ func TestKeeperKeepsTheKBestInOrder(t *testing.T) {
 	}
 }
 
+// Offer says whether it kept the value, and Worst is the value a new one has to beat: the
+// two things a search over a graph asks of its results (internal/adapters/hnsw).
+func TestOfferSaysWhatItKeptAndWorstWhatToBeat(t *testing.T) {
+	keep := New(2, desc)
+	if _, ok := keep.Worst(); ok {
+		t.Fatalf("Worst() of an empty keeper says there is one")
+	}
+	for _, tt := range []struct {
+		v, len, worst int
+		kept          bool
+	}{
+		{5, 1, 5, true},
+		{9, 2, 5, true},
+		{1, 2, 5, false},
+		{7, 2, 7, true},
+		{7, 2, 7, false}, // equal to the worst: not better, not kept
+	} {
+		if kept := keep.Offer(tt.v); kept != tt.kept {
+			t.Errorf("Offer(%d) = %v, want %v", tt.v, kept, tt.kept)
+		}
+		worst, _ := keep.Worst()
+		if keep.Len() != tt.len || worst != tt.worst {
+			t.Errorf("after Offer(%d): Len() = %d and Worst() = %d, want %d and %d", tt.v, keep.Len(), worst, tt.len, tt.worst)
+		}
+	}
+}
+
 func TestAKeeperOfferedNothingKeepsNothing(t *testing.T) {
 	if got := New(10, desc).Sorted(); len(got) != 0 {
 		t.Errorf("Sorted() = %v, want nothing", got)

@@ -25,12 +25,31 @@ const dim = 13
 // add the products in another order than shared.Vector.Dot does.
 const tolerance = 1e-5
 
-// Contract runs the tests every search.VectorIndex must pass. newIndex returns a new,
-// empty index for vectors of dim dimensions; each subtest asks for its own.
+// Contract runs the tests every exact search.VectorIndex must pass. newIndex returns a
+// new, empty index for vectors of dim dimensions; each subtest asks for its own.
 //
-// The suite is the one of an exact index: every search must return the k best hits, the
-// ones a scan of every vector finds.
+// Every search must return the k best hits, the ones a scan of every vector finds, in the
+// same order.
 func Contract(t *testing.T, newIndex func(t *testing.T, dim int) search.VectorIndex) {
+	run(t, newIndex, func(*testing.T) checker { return exact{} })
+}
+
+// ApproximateContract runs the tests of Contract on an index that may miss some of the k
+// best, as an HNSW graph does. Where Contract asks for the k best, it asks for real hits:
+// as many as Contract wants, each a chunk of the index, once, with the dot product of the
+// query and its vector as the score, in the order of retrieval.Compare. And, over all the
+// searches of a subtest, for a recall of at least minRecall: the share of the k best the
+// index found.
+func ApproximateContract(t *testing.T, minRecall float64, newIndex func(t *testing.T, dim int) search.VectorIndex) {
+	run(t, newIndex, func(t *testing.T) checker { return newRecall(t, minRecall) })
+}
+
+// checker is how a subtest compares what a search found with the k best of a scan.
+type checker interface {
+	check(t *testing.T, entries []entry, q shared.Vector, got []retrieval.Hit, k int)
+}
+
+func run(t *testing.T, newIndex func(t *testing.T, dim int) search.VectorIndex, newChecker func(*testing.T) checker) {
 	t.Run("ANewIndexFindsNothing", func(t *testing.T) {
 		idx := newIndex(t, dim)
 		if n := idx.Len(); n != 0 {
@@ -43,35 +62,32 @@ func Contract(t *testing.T, newIndex func(t *testing.T, dim int) search.VectorIn
 	})
 
 	t.Run("AVectorFindsItself", func(t *testing.T) {
-		idx := newIndex(t, dim)
+		idx, c := newIndex(t, dim), newChecker(t)
 		entries := fill(t, idx, 2, 100)
 		for _, e := range entries[:10] {
-			hits := find(t, idx, e.v, 1)
-			if len(hits) != 1 || hits[0].Chunk != e.id || math.Abs(float64(hits[0].Score)-1) > tolerance {
-				t.Fatalf("searching the vector of %s found %s, want that chunk with score 1", e.id, short(hits))
-			}
+			c.check(t, entries, e.v, find(t, idx, e.v, 1), 1)
 		}
 	})
 
 	t.Run("SearchReturnsTheKBestInOrder", func(t *testing.T) {
-		idx := newIndex(t, dim)
+		idx, c := newIndex(t, dim), newChecker(t)
 		entries := fill(t, idx, 3, 300)
 		r := rand.New(rand.NewPCG(3, 3))
 		for range 20 {
 			q := Vector(t, r, dim)
-			same(t, find(t, idx, q, 10), best(entries, q, 10))
+			c.check(t, entries, q, find(t, idx, q, 10), 10)
 		}
 	})
 
 	t.Run("AnIndexWithFewerThanKReturnsThemAll", func(t *testing.T) {
-		idx := newIndex(t, dim)
+		idx, c := newIndex(t, dim), newChecker(t)
 		entries := fill(t, idx, 4, 3)
 		q := entries[0].v
-		same(t, find(t, idx, q, 10), best(entries, q, 10))
+		c.check(t, entries, q, find(t, idx, q, 10), 10)
 	})
 
 	t.Run("EqualScoresAreRankedByChunkID", func(t *testing.T) {
-		idx := newIndex(t, dim)
+		idx, c := newIndex(t, dim), newChecker(t)
 		entries := fill(t, idx, 5, 50)
 		v := entries[0].v
 		for i := range 5 {
@@ -79,7 +95,7 @@ func Contract(t *testing.T, newIndex func(t *testing.T, dim int) search.VectorIn
 			add(t, idx, id, v)
 			entries = append(entries, entry{id, v})
 		}
-		same(t, find(t, idx, v, 6), best(entries, v, 6))
+		c.check(t, entries, v, find(t, idx, v, 6), 6)
 	})
 
 	t.Run("AddRefusesWhatTheIndexCannotKeep", func(t *testing.T) {
@@ -144,18 +160,18 @@ func Contract(t *testing.T, newIndex func(t *testing.T, dim int) search.VectorIn
 	})
 
 	t.Run("TheHitsBelongToTheCaller", func(t *testing.T) {
-		idx := newIndex(t, dim)
+		idx, c := newIndex(t, dim), newChecker(t)
 		entries := fill(t, idx, 9, 20)
 		q := entries[0].v
 		first := find(t, idx, q, 5)
 		for i := range first {
 			first[i] = retrieval.Hit{}
 		}
-		same(t, find(t, idx, q, 5), best(entries, q, 5))
+		c.check(t, entries, q, find(t, idx, q, 5), 5)
 	})
 
 	t.Run("AddAndSearchAreSafeForConcurrentCalls", func(t *testing.T) {
-		idx := newIndex(t, dim)
+		idx, c := newIndex(t, dim), newChecker(t)
 		const adders, each = 4, 50
 		var wg sync.WaitGroup
 		vectors := make([][]entry, adders)
@@ -190,7 +206,7 @@ func Contract(t *testing.T, newIndex func(t *testing.T, dim int) search.VectorIn
 		}
 		all := slices.Concat(vectors...)
 		for _, e := range all[:10] {
-			same(t, find(t, idx, e.v, 3), best(all, e.v, 3))
+			c.check(t, all, e.v, find(t, idx, e.v, 3), 3)
 		}
 	})
 }
@@ -276,6 +292,64 @@ func same(t *testing.T, got, want []retrieval.Hit) {
 	}
 	if !ok {
 		t.Fatalf("Search found\n%s\nwant\n%s", short(got), short(want))
+	}
+}
+
+// exact is the checker of Contract: the k best, in order.
+type exact struct{}
+
+func (exact) check(t *testing.T, entries []entry, q shared.Vector, got []retrieval.Hit, k int) {
+	t.Helper()
+	same(t, got, best(entries, q, k))
+}
+
+// recall is the checker of ApproximateContract. It checks each search on its own for real
+// hits, and the recall of all of them when the subtest ends.
+type recall struct {
+	min         float64
+	found, want int
+}
+
+func newRecall(t *testing.T, minRecall float64) *recall {
+	r := &recall{min: minRecall}
+	t.Cleanup(func() {
+		if got := float64(r.found) / float64(r.want); r.want > 0 && got < r.min {
+			t.Errorf("recall %.3f (%d of the %d best), want at least %.3f", got, r.found, r.want, r.min)
+		}
+	})
+	return r
+}
+
+func (r *recall) check(t *testing.T, entries []entry, q shared.Vector, got []retrieval.Hit, k int) {
+	t.Helper()
+	want := best(entries, q, k)
+	if len(got) != len(want) {
+		t.Fatalf("Search found %d hits, want %d: %s", len(got), len(want), short(got))
+	}
+	vectors := make(map[shared.ChunkID]shared.Vector, len(entries))
+	for _, e := range entries {
+		vectors[e.id] = e.v
+	}
+	seen := make(map[shared.ChunkID]bool, len(got))
+	for i, h := range got {
+		v, ok := vectors[h.Chunk]
+		switch {
+		case !ok:
+			t.Fatalf("Search found %s, a chunk the index was never given", h.Chunk)
+		case seen[h.Chunk]:
+			t.Fatalf("Search found %s twice: %s", h.Chunk, short(got))
+		case math.Abs(float64(h.Score-q.Dot(v))) > tolerance:
+			t.Fatalf("Search gave %s the score %.6f, its dot product is %.6f", h.Chunk, h.Score, q.Dot(v))
+		case i > 0 && retrieval.Compare(got[i-1], h) > 0:
+			t.Fatalf("Search found hits out of order: %s", short(got))
+		}
+		seen[h.Chunk] = true
+	}
+	r.want += len(want)
+	for _, w := range want {
+		if seen[w.Chunk] {
+			r.found++
+		}
 	}
 }
 
