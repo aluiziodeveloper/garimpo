@@ -64,13 +64,14 @@ func (x *Index) setLinks(n int32, l int, links []int32) {
 	x.prune(own, l)
 }
 
-// linksOf returns a copy of the links of node id on level l, taken under its lock: the
-// walk reads the copy while other inserts change the links.
-func (x *Index) linksOf(id int32, l int) []int32 {
+// appendLinks appends to dst the links of node id on level l, copied under its lock, and
+// returns it: the walk reads the copy while other inserts change the links. A walk passes
+// the same buffer for every node, so a copy allocates only when the buffer has to grow.
+func (x *Index) appendLinks(dst []int32, id int32, l int) []int32 {
 	n := x.node(id)
 	n.mu.Lock()
 	defer n.mu.Unlock()
-	return slices.Clone(n.links[l])
+	return append(dst, n.links[l]...)
 }
 
 // link adds a link from the node from to the node to on level l and, past the limit of
@@ -104,6 +105,7 @@ func (x *Index) searchLayer(q []float32, ep []candidate, ef, l int) []candidate 
 	visited := make(map[int32]bool, ef*4)
 	queue := &bestFirst{}
 	found := topk.New(ef, closer)
+	var links []int32
 	for _, c := range ep {
 		visited[c.id] = true
 		queue.push(c)
@@ -114,7 +116,8 @@ func (x *Index) searchLayer(q []float32, ep []candidate, ef, l int) []candidate 
 		if worst, _ := found.Worst(); found.Len() == ef && closer(c, worst) > 0 {
 			break
 		}
-		for _, id := range x.linksOf(c.id, l) {
+		links = x.appendLinks(links[:0], c.id, l)
+		for _, id := range links {
 			if visited[id] {
 				continue
 			}
