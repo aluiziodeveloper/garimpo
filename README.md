@@ -323,6 +323,30 @@ search under way at once: 410 KiB on the corpus.
 BENCH_CPUSET=2,4,6,8,10,12,14,16 docker compose run --rm bench sh -c 'GARIMPO_CORPUS=/usr/local/go/src go test -run TestIndexOnTheCorpus -v ./internal/adapters/bm25'
 ```
 
+## Searching by meaning and by terms
+
+`search.Hybrid` searches the vector index with the vector of the query and the keyword
+index with its text, at once, and fuses the two rankings with Reciprocal Rank Fusion
+(`retrieval.Fuse`, k = 60): each chunk scores 1/(60 + its rank) in each ranking that holds
+it, so a chunk both find comes first. Only the ranks count; a cosine and a BM25 score are
+on scales that cannot be added. The first error of either search cancels the other.
+
+A search must also stop when its caller gives up. The exact indexes checked the context
+only before the scan: a search with a deadline shorter than a scan ran to the end, and
+returned its hits, with no error, milliseconds past the deadline (INC-15). They now check it
+every `search.ScanCheck` (1,024) vectors. 4 goroutines, 100 searches each with a deadline,
+on the real vectors of the corpus (38,744 in the index), 8 virtual CPUs, 2026-11-27:
+
+| Index | Deadline | Before: past the deadline p50, p99, max | Errors | After: past the deadline p50, p99, max | Errors |
+|---|---|---|---|---|---|
+| `Index` | 1 ms | 4.882, 8.443, 8.85 ms | 400 `nil` | 0.246, 1.366, 1.467 ms | 400 `DeadlineExceeded` |
+| `Index` | 2 ms | 3.8, 8.284, 25.451 ms | 400 `nil` | 0.330, 1.146, 1.256 ms | 400 `DeadlineExceeded` |
+| `Published` | 1 ms | 4.821, 10.395, 12.296 ms | 400 `nil` | 0.188, 1.238, 1.338 ms | 400 `DeadlineExceeded` |
+| `Published` | 2 ms | 3.803, 7.879, 8.287 ms | 400 `nil` | 0.367, 1.112, 1.155 ms | 400 `DeadlineExceeded` |
+
+The checks cost nothing measurable: `BenchmarkSearch` and `BenchmarkSearchPublished`, 10
+runs each before and after, differ within the noise (benchstat: p = 0.353 and p = 1.000).
+
 ## Checks
 
 The same commands run in CI on every pull request:

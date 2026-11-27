@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/aluiziodeveloper/garimpo/internal/app/search"
@@ -30,8 +31,52 @@ const tolerance = 1e-5
 //
 // Every search must return the k best hits, the ones a scan of every vector finds, in the
 // same order.
+//
+// An exact search scans every vector, so it must also check ctx as it scans, at least once
+// every search.ScanCheck vectors, and stop when ctx is done (INC-15).
 func Contract(t *testing.T, newIndex func(t *testing.T, dim int) search.VectorIndex) {
 	run(t, newIndex, func(*testing.T) checker { return exact{} })
+
+	t.Run("SearchChecksTheContextAsItScans", func(t *testing.T) {
+		idx := newIndex(t, dim)
+		const n = 8 * search.ScanCheck
+		fill(t, idx, 9, n)
+		q := Vector(t, rand.New(rand.NewPCG(9, 10)), dim)
+		ctx := &countingContext{Context: t.Context(), doneAfter: -1}
+		if _, err := idx.Search(ctx, q, 5); err != nil {
+			t.Fatal(err)
+		}
+		if got, want := ctx.calls.Load(), int64(n/search.ScanCheck/2); got < want {
+			t.Errorf("a search of %d vectors called ctx.Err %d times, want at least %d", n, got, want)
+		}
+	})
+
+	t.Run("SearchStopsWhenTheContextIsDoneDuringTheScan", func(t *testing.T) {
+		idx := newIndex(t, dim)
+		fill(t, idx, 10, 8*search.ScanCheck)
+		q := Vector(t, rand.New(rand.NewPCG(10, 10)), dim)
+		ctx := &countingContext{Context: t.Context(), doneAfter: 1} // done once the scan starts
+		if hits, err := idx.Search(ctx, q, 5); !errors.Is(err, context.Canceled) || hits != nil {
+			t.Errorf("Search whose context is done during the scan: %d hits, err = %v, want none and context.Canceled", len(hits), err)
+		}
+	})
+}
+
+// countingContext counts the calls to Err, and is done, with context.Canceled, after
+// doneAfter of them; never, when doneAfter is negative. It tells whether a search checks its
+// context during the scan without a clock: a deadline would make the test depend on how fast
+// the machine scans.
+type countingContext struct {
+	context.Context
+	calls     atomic.Int64
+	doneAfter int64
+}
+
+func (c *countingContext) Err() error {
+	if n := c.calls.Add(1); c.doneAfter >= 0 && n > c.doneAfter {
+		return context.Canceled
+	}
+	return nil
 }
 
 // ApproximateContract runs the tests of Contract on an index that may miss some of the k

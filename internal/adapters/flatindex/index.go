@@ -81,6 +81,11 @@ func (x *Index) Search(ctx context.Context, q shared.Vector, k int) ([]retrieval
 	// A heap of k, but never larger than the index: k comes from the caller.
 	best := topk.New(min(k, len(x.ids)), retrieval.Compare)
 	for i, id := range x.ids {
+		if i%search.ScanCheck == search.ScanCheck-1 {
+			if err := ctx.Err(); err != nil {
+				return nil, err // the caller gave up: the rest of the scan would be for no one
+			}
+		}
 		best.Offer(retrieval.Hit{Chunk: id, Score: vec.Dot(query, x.values[i*x.dim:(i+1)*x.dim])})
 	}
 	return best.Sorted(), nil

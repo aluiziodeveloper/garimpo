@@ -24,6 +24,11 @@ var (
 	ErrInvalidK = errors.New("k must be at least 1")
 )
 
+// ScanCheck is how many vectors an exact index may score between two checks of ctx: often
+// enough to stop a search of the corpus within a fraction of a millisecond of its deadline,
+// seldom enough that the checks cost nothing next to the dot products.
+const ScanCheck = 1024
+
 // VectorIndex keeps the vectors of the chunks and finds the ones closest to a query: the
 // port to every vector index of Garimpo, the exact one of module 12 and the HNSW of module
 // 13.
@@ -38,6 +43,11 @@ var (
 // below 1, ErrWrongDimension when q does not have the index's dimension, and ctx's error
 // when ctx is done before the search starts. An exact index returns the k best; an
 // approximate one may miss some, as measured by recall.
+//
+// An exact index scans every vector, which takes milliseconds on the corpus, so it also
+// checks ctx during the scan, at least once every ScanCheck vectors, and fails with ctx's
+// error, and no hits, when ctx is done (INC-15). An approximate index, which visits few
+// vectors, may check it only before it starts.
 //
 // Len returns how many vectors the index keeps. Add, Search and Len are safe for
 // concurrent calls. indextest.Contract checks all of this.
