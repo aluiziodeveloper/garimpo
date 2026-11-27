@@ -31,6 +31,9 @@ the lessons use the Portuguese word in parentheses.
 | **hit** (acerto) | A chunk returned by a search, with its score | 03-02 |
 | **ranking** (ranking) | The hits of a search, best first: the higher score first and, between equal scores, the lower `ChunkID` (`retrieval.Compare`), so every index and every run rank them the same way | 12-02 |
 | **answer** (resposta) | Generated text grounded in chunks, with citations | 03-02 |
+| **term** (termo) | A run of letters and digits of a text, in lower case, of two characters or more: what the keyword index keeps of a chunk and looks for in a query (`bm25.Terms`) | 15-03 |
+| **keyword search** (busca por palavra-chave) | A search by the terms of the query, ranked by BM25 (`search.KeywordIndex`, `bm25.Index`): it finds a name the model never learned | 15-03 |
+| **hybrid search** (busca híbrida) | A search by vector and by keyword at once, the two rankings fused by RRF (`search.Hybrid`) | 15-09 |
 
 ## Design
 
@@ -78,6 +81,10 @@ the lessons use the Portuguese word in parentheses.
 | **CQRS** | Command Query Responsibility Segregation: the side that changes the state apart from the side that reads it. In Garimpo it is light, one process and one store: `Add` makes and publishes versions, `Search` only reads them | 14-02 |
 | **eventual consistency** (consistência eventual) | A reader may not see a change yet, and will: in `flatindex.Published`, a search misses only the `Add` calls still under way | 14-02 |
 | **copy on write** (cópia na escrita) | Never changing a value that readers may hold: a write makes a new version and publishes it. Sharing the arrays is safe while one writer appends past the end of what any version holds | 14-03 |
+| **inverted index** (índice invertido) | A map from each term to the chunks that hold it, its postings, with how many times each holds it: a search reads only the postings of its terms | 15-02 |
+| **BM25** | A score of a chunk for a query: for each term of the query, its IDF times a weight that grows with how often the chunk has it, less and less (`K1`), and falls with the length of the chunk (`B`) | 15-02 |
+| **IDF** (frequência inversa nos documentos) | The weight of a term: high for a term few chunks have, low for one most have. Garimpo uses Lucene's, `ln(1 + (N - n + 0.5) / (n + 0.5))`, never negative | 15-02 |
+| **RRF** (Reciprocal Rank Fusion) | Fuses rankings by their ranks alone: a chunk scores the sum of 1/(k + its rank) over the rankings that hold it, k = 60 (`retrieval.Fuse`) | 15-08 |
 
 ## Go and runtime
 
@@ -153,6 +160,10 @@ the lessons use the Portuguese word in parentheses.
 | **`unique.Handle`** | The handle of an interned value: `unique.Make` gives equal values the same handle, keeps the value once, and two handles compare as two pointers (`unique`, Go 1.23) | 14-08 |
 | **`runtime.AddCleanup`** | Runs a function, with an argument, after the GC frees a value; unlike `SetFinalizer`, it does not bring the value back, and several can watch one value. The function must not reach the value, or it never runs: Go 1.27.4 panics at `AddCleanup` when the function closes over it | 14-08 |
 | **substring retention** (retenção por substring) | A substring shares the bytes of its string: holding a small one keeps the whole string alive. 1,000 texts of chunks held as substrings of their files took 108.7 MiB; copied with `strings.Clone`, 0.65 MiB | 14-10 |
+| **`sync.Pool`** | A cache of temporary objects shared by goroutines: `Get` returns one, or `New`'s, and `Put` gives it back. What it returns holds what the last user left in it; it keeps pointers best, since `Put` takes an `any` | 15-05 |
+| **victim cache** (cache de vítimas) | Where a GC moves what a `sync.Pool` holds; `Get` still finds it there, and the next GC drops it: a pool empties in two cycles. Under `-race`, `Put` drops an object in four on purpose | 15-06 |
+| **map key replacement** (substituição da chave) | Storing to a key a map has, `m[k] = v`, replaces the stored key with `k` when the key type holds a string, a float, a complex or an interface: a copy stored once is lost to the substring of the next text | 15-04 |
+| **cooperative cancellation** (cancelamento cooperativo) | A context stops nothing by itself: it closes `Done` and makes `Err` return an error, and only code that looks at them stops. A long loop of CPU must look (INC-15) | 15-01 |
 
 ## Infrastructure
 
