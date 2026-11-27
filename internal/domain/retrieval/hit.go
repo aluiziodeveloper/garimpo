@@ -6,12 +6,14 @@ import (
 	"github.com/aluiziodeveloper/garimpo/internal/domain/shared"
 )
 
-// Hit is a chunk a search found and its score: the dot product of the query and the
-// chunk's vector, which is their cosine similarity (RN07). Higher is closer.
+// Hit is a chunk a search found and its score. Higher is closer, on the scale of the search
+// that made it: for a vector index, the dot product of the query and the chunk's vector,
+// which is their cosine similarity (RN07), between -1 and 1 give or take the rounding of
+// float32; for the keyword index, the BM25 score of the chunk, 0 or more; for Fuse, the sum
+// of the reciprocal ranks.
 //
 // It is a value with no invariant of its own: the index makes it from a chunk and a vector
-// that were valid when added, and every score of norm-1 vectors is between -1 and 1, give
-// or take the rounding of float32.
+// or a text that were valid when added.
 type Hit struct {
 	Chunk shared.ChunkID
 	Score float32
