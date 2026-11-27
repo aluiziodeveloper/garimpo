@@ -233,6 +233,24 @@ vectors, not because they waited.
 BENCH_CPUSET=2,4,6,8,10,12,14,16 docker compose run --rm bench sh -c 'GARIMPO_VECTORS=/src/.bs/corpus.vec go test -run TestSearchDuringIngestOnTheCorpus -v ./internal/adapters/flatindex'
 ```
 
+A search sees every `Add` that returned before it started
+(`TestASearchSeesEveryAddThatReturned`): the consistency is eventual only for the `Add`
+under way. How long it stays under way is the staleness, from the start of an `Add` to the
+moment another goroutine sees the vector, measured the same way, 100 vectors, one every 35
+ms:
+
+| Index | Staleness p50 | Staleness max | Add p50 | Add max |
+|---|---|---|---|---|
+| `Index` | 4.783 ms | 8 ms | 4.633 ms | 7.923 ms |
+| `Published` | 25 µs | 63 µs | 25 µs | 63 µs |
+
+In both, a vector is seen as soon as its `Add` returns; what `Published` takes away is the
+wait for the scans.
+
+```bash
+BENCH_CPUSET=2,4,6,8,10,12,14,16 docker compose run --rm bench sh -c 'GARIMPO_VECTORS=/src/.bs/corpus.vec go test -run TestStalenessOnTheCorpus -v ./internal/adapters/flatindex'
+```
+
 ## Checks
 
 The same commands run in CI on every pull request:

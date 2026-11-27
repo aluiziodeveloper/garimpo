@@ -16,6 +16,16 @@ import (
 	"github.com/aluiziodeveloper/garimpo/internal/domain/shared"
 )
 
+// exactIndexes are the two exact indexes the measurements on the corpus compare: the one
+// guarded by a RWMutex, and the one that publishes snapshots.
+var exactIndexes = []struct {
+	name string
+	new  func(dim int) search.VectorIndex
+}{
+	{"Index", func(dim int) search.VectorIndex { return flatindex.New(dim) }},
+	{"Published", func(dim int) search.VectorIndex { return flatindex.NewPublished(dim) }},
+}
+
 // TestSearchDuringIngestOnTheCorpus measures the searches and the Adds of each exact index
 // at once, on the real vectors of the corpus, the file that garimpo ingest -vectors writes,
 // named by GARIMPO_VECTORS; without it, it skips (INC-14). The index holds all but the last
@@ -39,14 +49,7 @@ func TestSearchDuringIngestOnTheCorpus(t *testing.T) {
 		t.Fatalf("%s has %d vectors, want more than %d", path, len(vectors), queries)
 	}
 	base, extra := vectors[:len(vectors)-queries], vectors[len(vectors)-queries:]
-	indexes := []struct {
-		name string
-		new  func(dim int) search.VectorIndex
-	}{
-		{"Index", func(dim int) search.VectorIndex { return flatindex.New(dim) }},
-		{"Published", func(dim int) search.VectorIndex { return flatindex.NewPublished(dim) }},
-	}
-	for _, ix := range indexes {
+	for _, ix := range exactIndexes {
 		for _, c := range []struct {
 			searchers int
 			pace      time.Duration // between two Adds; negative: no Adds

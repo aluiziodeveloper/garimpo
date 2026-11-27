@@ -3,6 +3,8 @@ package flatindex_test
 import (
 	"fmt"
 	"math/rand/v2"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/aluiziodeveloper/garimpo/internal/adapters/flatindex"
@@ -53,6 +55,54 @@ func TestASnapshotStaysAsItWasAfterAnAdd(t *testing.T) {
 	}
 	if after.Len() != 4 || after.Version() != 4 {
 		t.Errorf("the snapshot taken after the Add has %d chunks, version %d; want 4, version 4", after.Len(), after.Version())
+	}
+}
+
+// A search sees every Add that returned before it started: the consistency is eventual
+// only for the Adds still under way. One goroutine adds 500 vectors and counts the Adds
+// that returned; 4 others, after reading the count, search for the last vector counted and
+// must find it first.
+func TestASearchSeesEveryAddThatReturned(t *testing.T) {
+	for _, ix := range []struct {
+		name string
+		idx  search.VectorIndex
+	}{{"Index", flatindex.New(16)}, {"Published", flatindex.NewPublished(16)}} {
+		t.Run(ix.name, func(t *testing.T) {
+			r := rand.New(rand.NewPCG(5, 7))
+			vs := make([]shared.Vector, 500)
+			for i := range vs {
+				vs[i] = indextest.Vector(t, r, 16)
+			}
+			var returned atomic.Int64
+			var wg sync.WaitGroup
+			for range 4 {
+				wg.Go(func() {
+					for c := returned.Load(); c < int64(len(vs)); c = returned.Load() {
+						if c == 0 {
+							continue
+						}
+						hits, err := ix.idx.Search(t.Context(), vs[c-1], 1)
+						if err != nil {
+							t.Error(err)
+							return
+						}
+						if len(hits) != 1 || hits[0].Chunk != indextest.Chunk(t, int(c-1)) {
+							t.Errorf("after %d Adds returned, a search for vector %d found %v", c, c-1, hits)
+							return
+						}
+					}
+				})
+			}
+			for i, v := range vs {
+				if err := ix.idx.Add(indextest.Chunk(t, i), v); err != nil {
+					t.Error(err)
+					returned.Store(int64(len(vs)))
+					break
+				}
+				returned.Store(int64(i + 1))
+			}
+			wg.Wait()
+		})
 	}
 }
 
