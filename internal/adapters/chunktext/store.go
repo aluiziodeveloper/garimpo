@@ -51,9 +51,18 @@ type Store struct {
 	fsys  fs.FS
 	reads atomic.Int64
 
-	mu     sync.Mutex
-	places map[shared.ChunkID]place
-	texts  map[shared.ChunkID]weak.Pointer[Text]
+	mu       sync.Mutex
+	places   map[shared.ChunkID]place
+	texts    map[shared.ChunkID]weak.Pointer[Text]
+	inflight map[shared.ChunkID]*call // the reads under way
+}
+
+// call is a read of the corpus under way: the callers that miss the same chunk meanwhile
+// wait for done and share its result.
+type call struct {
+	done chan struct{}
+	t    *Text
+	err  error
 }
 
 var _ shared.ChunkFinder = (*Store)(nil)
@@ -61,9 +70,10 @@ var _ shared.ChunkFinder = (*Store)(nil)
 // New returns an empty store of the corpus in fsys.
 func New(fsys fs.FS) *Store {
 	return &Store{
-		fsys:   fsys,
-		places: make(map[shared.ChunkID]place),
-		texts:  make(map[shared.ChunkID]weak.Pointer[Text]),
+		fsys:     fsys,
+		places:   make(map[shared.ChunkID]place),
+		texts:    make(map[shared.ChunkID]weak.Pointer[Text]),
+		inflight: make(map[shared.ChunkID]*call),
 	}
 }
 
@@ -88,33 +98,42 @@ func (s *Store) FindChunk(id shared.ChunkID) (path string, start, end int, ok bo
 }
 
 // Text returns the text of the chunk id: the one another caller holds, if any, or else
-// the one it reads from the corpus. It fails for a chunk not added, a file it cannot read,
-// or a file that no longer holds the chunk.
+// the one it reads from the corpus. Callers that miss the same chunk at once share one
+// read. It fails for a chunk not added, a file it cannot read, or a file that no longer
+// holds the chunk.
 func (s *Store) Text(id shared.ChunkID) (*Text, error) {
 	s.mu.Lock()
 	p, ok := s.places[id]
-	t := s.texts[id].Value() // nil when there is no entry, or when the GC took the text
-	s.mu.Unlock()
-	switch {
-	case !ok:
+	if !ok {
+		s.mu.Unlock()
 		return nil, fmt.Errorf("%w: %s", ErrUnknownChunk, id)
-	case t != nil:
+	}
+	if t := s.texts[id].Value(); t != nil { // nil when there is no entry, or the GC took it
+		s.mu.Unlock()
 		return t, nil
 	}
-	read, err := s.read(id, p)
-	if err != nil {
-		return nil, err
+	if c, ok := s.inflight[id]; ok {
+		s.mu.Unlock()
+		<-c.done
+		return c.t, c.err
 	}
+	c := &call{done: make(chan struct{})}
+	s.inflight[id] = c
+	s.mu.Unlock()
+
+	c.t, c.err = s.read(id, p)
+
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	if t := s.texts[id].Value(); t != nil {
-		return t, nil // another caller read it meanwhile: share theirs
+	delete(s.inflight, id)
+	if c.err == nil {
+		w := weak.Make(c.t)
+		s.texts[id] = w
+		// The cleanup's argument must not reach c.t, or it would never be freed.
+		runtime.AddCleanup(c.t, s.forget, entry{id, w})
 	}
-	w := weak.Make(read)
-	s.texts[id] = w
-	// The cleanup's argument must not reach read, or read would never be freed.
-	runtime.AddCleanup(read, s.forget, entry{id, w})
-	return read, nil
+	s.mu.Unlock()
+	close(c.done) // after the entry: a caller that arrives now finds the text
+	return c.t, c.err
 }
 
 // read reads the text of chunk id from the corpus, only its bytes when the file can be

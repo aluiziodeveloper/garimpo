@@ -2,8 +2,10 @@ package chunktext_test
 
 import (
 	"errors"
+	"io/fs"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -174,4 +176,62 @@ func TestTextIsSafeForConcurrentCalls(t *testing.T) {
 		})
 	}
 	wg.Wait()
+}
+
+// gated is a file system whose Open waits for the gate to open, and counts the calls.
+type gated struct {
+	fs.FS
+	gate  chan struct{}
+	opens atomic.Int64
+}
+
+func (g *gated) Open(name string) (fs.File, error) {
+	g.opens.Add(1)
+	<-g.gate
+	return g.FS.Open(name)
+}
+
+// Callers that miss the same chunk while it is being read share that read.
+func TestConcurrentMissesShareOneRead(t *testing.T) {
+	g := &gated{FS: small, gate: make(chan struct{})}
+	cutter, err := ingestion.NewCutter(window)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := ingestion.NewDocument("a/a.go", string(small["a/a.go"].Data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := chunktext.New(g)
+	var c ingestion.Chunk
+	for c = range cutter.Cut(d) {
+		break
+	}
+	if err := s.Add(c); err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	texts := make([]*chunktext.Text, 8)
+	for i := range texts {
+		wg.Go(func() {
+			var err error
+			if texts[i], err = s.Text(c.ID()); err != nil {
+				t.Error(err)
+			}
+		})
+	}
+	for g.opens.Load() == 0 {
+		runtime.Gosched()
+	}
+	time.Sleep(50 * time.Millisecond) // the other callers reach the read under way
+	close(g.gate)
+	wg.Wait()
+	if s.Reads() != 1 || g.opens.Load() != 1 {
+		t.Errorf("8 callers at once: %d reads, %d opens; want 1 and 1", s.Reads(), g.opens.Load())
+	}
+	for i, tx := range texts {
+		if tx != texts[0] {
+			t.Errorf("caller %d got another text than caller 0", i)
+		}
+	}
 }
