@@ -49,6 +49,10 @@ jobs:
         run: go test -race -count=1 ./...
         env:
           GOEXPERIMENT: simd
+      # These tests skip under -race, which drops one sync.Pool Put in four on purpose: they
+      # count what a pool keeps, so they run here without it.
+      - name: Tests that skip under the race detector
+        run: go test -count=1 -v -run 'TestTheGCEmptiesThePoolInTwoCycles|TestASearchAllocatesAlikeForAFewChunksOrMany' ./labs/pool ./internal/adapters/bm25
       # The SIMD tests skip on a runner without AVX2 and FMA: -v shows PASS or SKIP in the log.
       - name: SIMD paths (GOEXPERIMENT=simd)
         run: go test -count=1 -v -run 'SIMD|EveryVersion' ./internal/vec ./labs/simd

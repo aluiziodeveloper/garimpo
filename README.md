@@ -230,7 +230,7 @@ noise. With no pause between `Add` calls, `Index` took 749 in 5 s, and `Publishe
 vectors, not because they waited.
 
 ```bash
-BENCH_CPUSET=2,4,6,8,10,12,14,16 docker compose run --rm bench sh -c 'GARIMPO_VECTORS=/src/.bs/corpus.vec go test -run TestSearchDuringIngestOnTheCorpus -v ./internal/adapters/flatindex'
+BENCH_CPUSET=2,4,6,8,10,12,14,16 docker compose run --rm bench sh -c 'GARIMPO_VECTORS=/src/.bs/corpus.vec go test -count=1 -run TestSearchDuringIngestOnTheCorpus -v ./internal/adapters/flatindex'
 ```
 
 A search sees every `Add` that returned before it started
@@ -248,7 +248,7 @@ In both, a vector is seen as soon as its `Add` returns; what `Published` takes a
 wait for the scans.
 
 ```bash
-BENCH_CPUSET=2,4,6,8,10,12,14,16 docker compose run --rm bench sh -c 'GARIMPO_VECTORS=/src/.bs/corpus.vec go test -run TestStalenessOnTheCorpus -v ./internal/adapters/flatindex'
+BENCH_CPUSET=2,4,6,8,10,12,14,16 docker compose run --rm bench sh -c 'GARIMPO_VECTORS=/src/.bs/corpus.vec go test -count=1 -run TestStalenessOnTheCorpus -v ./internal/adapters/flatindex'
 ```
 
 ## The texts of the chunks
@@ -273,7 +273,7 @@ those the queries in flight hold. A text taken as a substring of its file would 
 whole file alive: 1,000 such texts held 108.7 MiB, against 0.65 MiB for copies.
 
 ```bash
-BENCH_CPUSET=2,4,6,8,10,12,14,16 docker compose run --rm bench sh -c 'GARIMPO_CORPUS=/usr/local/go/src go test -run TestStoreOnTheCorpus -v ./internal/adapters/chunktext'
+BENCH_CPUSET=2,4,6,8,10,12,14,16 docker compose run --rm bench sh -c 'GARIMPO_CORPUS=/usr/local/go/src go test -count=1 -run TestStoreOnTheCorpus -v ./internal/adapters/chunktext'
 ```
 
 ## Searching by keyword
@@ -320,7 +320,7 @@ The pool keeps a slice of 8 bytes a chunk, plus a quarter for the index to grow,
 search under way at once: 410 KiB on the corpus.
 
 ```bash
-BENCH_CPUSET=2,4,6,8,10,12,14,16 docker compose run --rm bench sh -c 'GARIMPO_CORPUS=/usr/local/go/src go test -run TestIndexOnTheCorpus -v ./internal/adapters/bm25'
+BENCH_CPUSET=2,4,6,8,10,12,14,16 docker compose run --rm bench sh -c 'GARIMPO_CORPUS=/usr/local/go/src go test -count=1 -run TestIndexOnTheCorpus -v ./internal/adapters/bm25'
 ```
 
 ## Searching by meaning and by terms

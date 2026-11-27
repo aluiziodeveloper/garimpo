@@ -104,7 +104,7 @@ func TestHybridAsksEachIndexForDepthHits(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got := emb.Calls(); len(got) != 2 || !slices.Equal(got[0], []string{"how to sort a slice"}) {
-		t.Errorf("the embedder got %q, want the query once", got[:1])
+		t.Errorf("the embedder got %q, then the test's own call; want the query once", got)
 	}
 	if len(vectors.queries) != 1 || vectors.queries[0].(shared.Vector).Dot(want[0]) < 0.9999 || !slices.Equal(vectors.ks, []int{40}) {
 		t.Errorf("the vector index got %v for k %v, want the query's vector for 40", vectors.queries, vectors.ks)
