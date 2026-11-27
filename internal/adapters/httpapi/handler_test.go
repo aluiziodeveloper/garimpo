@@ -45,8 +45,12 @@ func (r *ranker) Search(ctx context.Context, _ string, k int) ([]retrieval.Hit, 
 	return r.hits[:min(k, len(r.hits))], r.err
 }
 
-// texts holds chunks numbered n at sort/sort.go, lines n+1 to n+2.
-type texts struct{ known map[shared.ChunkID]int }
+// texts holds chunks numbered n at sort/sort.go, lines n+1 to n+2. text, when set, gives
+// the text of every chunk.
+type texts struct {
+	known map[shared.ChunkID]int
+	text  string
+}
 
 func (x texts) FindChunk(id shared.ChunkID) (string, int, int, bool) {
 	n, ok := x.known[id]
@@ -54,16 +58,24 @@ func (x texts) FindChunk(id shared.ChunkID) (string, int, int, bool) {
 }
 
 func (x texts) Text(id shared.ChunkID) (string, error) {
+	if x.text != "" {
+		return x.text, nil
+	}
 	return fmt.Sprint("text of ", x.known[id]), nil
 }
 
 // serve returns the handler over the real use case, with r as its ranker and chunks 1 to 3.
 func serve(t *testing.T, r *ranker, timeout time.Duration) http.Handler {
+	return serveTexts(t, r, timeout, "")
+}
+
+// serveTexts is serve with text as the text of every chunk, when not empty.
+func serveTexts(t *testing.T, r *ranker, timeout time.Duration, text string) http.Handler {
 	known := map[shared.ChunkID]int{}
 	for n := 1; n <= 3; n++ {
 		known[chunk(t, n)] = n
 	}
-	return httpapi.New(&search.Searcher{Ranker: r, Texts: texts{known}}, timeout, nil)
+	return httpapi.New(&search.Searcher{Ranker: r, Texts: texts{known, text}}, timeout, nil)
 }
 
 func get(t *testing.T, h http.Handler, target string) *httptest.ResponseRecorder {
@@ -173,5 +185,41 @@ func TestAFailedSearchIsAnsweredWith500(t *testing.T) {
 	}
 	if body := decode[httpapi.Error](t, w); strings.Contains(body.Error, "disk") {
 		t.Errorf("body %q shows the cause to the client", body.Error)
+	}
+}
+
+// The texts are Go code, full of <, > and &: the response writes them as they are (json/v2),
+// one byte each, not as \u003c, \u003e and \u0026, six bytes each, the escape for HTML of
+// v1. A JSON reader takes either.
+func TestTheTextsGoOutAsTheyAre(t *testing.T) {
+	code := "if a < b && b > 0 { return }"
+	r := &ranker{hits: []retrieval.Hit{{Chunk: chunk(t, 1), Score: 0.5}}}
+	w := get(t, serveTexts(t, r, time.Second, code), "/search?q=sort")
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d, want 200", w.Code)
+	}
+	if body := w.Body.String(); !strings.Contains(body, `"text":"`+code+`"`) {
+		t.Errorf("body = %s, want the text as it is", body)
+	}
+}
+
+// A text that is not valid UTF-8 cannot go out as JSON without changing it: the answer is
+// 500, not a 200 with U+FFFD in the place of the bytes, and nothing of the body is sent.
+func TestATextThatIsNotUTF8IsAnsweredWith500(t *testing.T) {
+	r := &ranker{hits: []retrieval.Hit{{Chunk: chunk(t, 1), Score: 0.5}}}
+	w := get(t, serveTexts(t, r, time.Second, "caf\xe9"), "/search?q=sort")
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("status %d, want 500: %s", w.Code, w.Body)
+	}
+	if body := decode[httpapi.Error](t, w); body.Error != "the search failed" {
+		t.Errorf("body %+v, want the error of a failed search", body)
+	}
+}
+
+// A search with no results answers an empty list, never null.
+func TestNoResultsIsAnEmptyList(t *testing.T) {
+	w := get(t, serve(t, &ranker{}, time.Second), "/search?q=sort")
+	if got, want := strings.TrimSpace(w.Body.String()), `{"query":"sort","results":[]}`; got != want {
+		t.Errorf("body = %s, want %s", got, want)
 	}
 }

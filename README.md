@@ -354,7 +354,8 @@ runs each before and after, differ within the noise (benchstat: p = 0.353 and p 
 (`flatindex.Published`), cuts the corpus again for the keyword index and the texts of the
 chunks, and serves `GET /search?q=<query>&k=<results>` (`internal/adapters/httpapi`): the
 use case `search.Searcher` over `search.Hybrid`, with a citation, the text and the score of
-each result. Every search has `-timeout` (2 s by default) to answer, counted from when the
+each result, as JSON of `encoding/json/v2`: the code in the texts goes out as it is,
+without the escapes for HTML of v1, and no results is `[]`. Every search has `-timeout` (2 s by default) to answer, counted from when the
 request arrives: past it, the search is canceled and the answer is 504. A bad query or `k`
 is 400. SIGINT or SIGTERM stops the server: it takes no new request and lets the ones in
 flight answer.
