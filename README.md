@@ -114,8 +114,9 @@ docker compose run --rm bench go test -run '^$' -bench Adaptive -benchtime 1x -c
 
 ## Recall on the corpus
 
-`-vectors` writes the vector of every chunk the ingestion embeds to a file
-(`internal/adapters/vectorfile`). The HNSW index (`internal/adapters/hnsw`) is measured on
+`-vectors` keeps the vector of every chunk the ingestion embeds in a file
+(`internal/adapters/vectorfile`), each with its chunk ID (version 2 of the format; the
+vectors-only files of version 1 still read). The HNSW index (`internal/adapters/hnsw`) is measured on
 it against the exact index (`internal/adapters/flatindex`): the share of the 10 best of each
 query that the graph finds, recall@10. Without `GARIMPO_VECTORS`, the test skips, as in CI:
 
@@ -346,6 +347,30 @@ on the real vectors of the corpus (38,744 in the index), 8 virtual CPUs, 2026-11
 
 The checks cost nothing measurable: `BenchmarkSearch` and `BenchmarkSearchPublished`, 10
 runs each before and after, differ within the noise (benchstat: p = 0.353 and p = 1.000).
+
+## Serving the searches
+
+`garimpo serve` loads the vectors an ingestion kept into the exact index
+(`flatindex.Published`), cuts the corpus again for the keyword index and the texts of the
+chunks, and serves `GET /search?q=<query>&k=<results>` (`internal/adapters/httpapi`): the
+use case `search.Searcher` over `search.Hybrid`, with a citation, the text and the score of
+each result. Every search has `-timeout` (2 s by default) to answer, counted from when the
+request arrives: past it, the search is canceled and the answer is 504. A bad query or `k`
+is 400. SIGINT or SIGTERM stops the server: it takes no new request and lets the ones in
+flight answer.
+
+It listens on `localhost:8080` in the `dev` container, and publishes no port: search from
+the container itself.
+
+```bash
+docker compose exec dev go run ./cmd/garimpo ingest -vectors /src/.bs/corpus-chunks.vec   # once, about 24 min
+docker compose exec dev go build -o bin/garimpo ./cmd/garimpo
+docker compose exec dev sh -c './bin/garimpo serve -vectors /src/.bs/corpus-chunks.vec & sleep 2; curl -s "localhost:8080/search?q=sort+a+slice&k=1"; kill $!'
+```
+
+On the corpus (2026-11-27), the server loads 41,980 chunks, 39,244 with vectors, in about
+0.7 s. The ingestion with `-vectors` took 23m37s (module 13's, which kept the vectors
+without their IDs, 22m48s).
 
 ## Checks
 
