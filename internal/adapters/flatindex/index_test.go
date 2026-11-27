@@ -27,6 +27,35 @@ func TestShardedMeetsTheContract(t *testing.T) {
 	}
 }
 
+func TestPublishedMeetsTheContract(t *testing.T) {
+	indextest.Contract(t, func(_ *testing.T, dim int) search.VectorIndex {
+		return flatindex.NewPublished(dim)
+	})
+}
+
+// A snapshot taken before an Add stays as it was (RN05): the Add publishes the next
+// version, and a search that started on the old one keeps reading the old one.
+func TestASnapshotStaysAsItWasAfterAnAdd(t *testing.T) {
+	x := flatindex.NewPublished(4)
+	r := rand.New(rand.NewPCG(9, 9))
+	for i := range 3 {
+		if err := x.Add(indextest.Chunk(t, i), indextest.Vector(t, r, 4)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	before := x.Snapshot()
+	if err := x.Add(indextest.Chunk(t, 3), indextest.Vector(t, r, 4)); err != nil {
+		t.Fatal(err)
+	}
+	after := x.Snapshot()
+	if before.Len() != 3 || before.Version() != 3 {
+		t.Errorf("the snapshot taken before the Add has %d chunks, version %d; want 3, version 3", before.Len(), before.Version())
+	}
+	if after.Len() != 4 || after.Version() != 4 {
+		t.Errorf("the snapshot taken after the Add has %d chunks, version %d; want 4, version 4", after.Len(), after.Version())
+	}
+}
+
 // corpus is the number of chunks of the whole corpus (module 07), and dim the dimension
 // of all-minilm.
 const corpus, dim = 41_980, 384
@@ -80,6 +109,16 @@ func BenchmarkShardedSearchParallel(b *testing.B) {
 }
 
 // filled adds corpus random vectors to idx and returns it with a random query.
+// BenchmarkSearchPublished is BenchmarkSearch on the index that publishes snapshots.
+func BenchmarkSearchPublished(b *testing.B) {
+	idx, q := filled(b, flatindex.NewPublished(dim))
+	for b.Loop() {
+		if _, err := idx.Search(b.Context(), q, 10); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
 func filled(b *testing.B, idx search.VectorIndex) (search.VectorIndex, shared.Vector) {
 	b.Helper()
 	r := rand.New(rand.NewPCG(1, 2))

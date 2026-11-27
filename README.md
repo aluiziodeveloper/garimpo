@@ -206,6 +206,33 @@ BENCH_CPUSET=2,4,6,8,10,12,14,16 docker compose run --rm bench sh -c 'go test -c
     go tool pprof -top -nodecount 10 hnsw.test cpu.out'
 ```
 
+## Searching while ingesting
+
+Garimpo will search the index while the ingestion adds to it. The exact index of module
+12, `flatindex.Index`, guards its vectors with a `sync.RWMutex`: a search holds it shared
+for the whole scan, and an `Add` waits for every scan under way (INC-14).
+`flatindex.Published` takes no lock to search: every `Add` publishes a new version of the
+index, an `indexing.IndexSnapshot` that never changes, in an `atomic.Pointer`, and a search
+reads the version it loaded. The two, on the real vectors of the corpus (38,744 in the
+index), 4 goroutines searching for 5 s, 8 virtual CPUs, 2026-11-27:
+
+| Index | Adds | Search p50 | Search p99 | Adds in 5 s | Add p50 | Add p99 |
+|---|---|---|---|---|---|---|
+| `Index` | none | 6.379 ms | 9.609 ms | | | |
+| `Index` | one every 35 ms | 6.442 ms | 9.811 ms | 128 | 3.388 ms | 7.749 ms |
+| `Published` | none | 6.645 ms | 9.737 ms | | | |
+| `Published` | one every 35 ms | 6.842 ms | 10.547 ms | 142 | 24 µs | 47 µs |
+
+At the pace of an ingestion (39,244 vectors in 22m48s), an `Add` of `Published` takes
+microseconds instead of the scan it waited for, and the searches do not change beyond the
+noise. With no pause between `Add` calls, `Index` took 749 in 5 s, and `Published` all
+200,000 the test offers: its searches slowed down because the index grew to 238,744
+vectors, not because they waited.
+
+```bash
+BENCH_CPUSET=2,4,6,8,10,12,14,16 docker compose run --rm bench sh -c 'GARIMPO_VECTORS=/src/.bs/corpus.vec go test -run TestSearchDuringIngestOnTheCorpus -v ./internal/adapters/flatindex'
+```
+
 ## Checks
 
 The same commands run in CI on every pull request:
