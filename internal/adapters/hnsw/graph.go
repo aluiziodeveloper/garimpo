@@ -5,7 +5,6 @@ import (
 	"container/heap"
 	"slices"
 
-	"github.com/aluiziodeveloper/garimpo/internal/domain/shared"
 	"github.com/aluiziodeveloper/garimpo/internal/topk"
 	"github.com/aluiziodeveloper/garimpo/internal/vec"
 )
@@ -25,50 +24,55 @@ func closer(a, b candidate) int {
 	return cmp.Compare(a.id, b.id)
 }
 
-// insert makes vec the vector of a new node of the chunk id and links it into the graph
-// (algorithm 1 of the paper). The caller holds the lock alone.
-func (x *Index) insert(id shared.ChunkID, v []float32) {
-	n := int32(len(x.nodes))
-	level := x.randomLevel()
-	x.ids = append(x.ids, id)
-	x.nodes = append(x.nodes, node{vec: v, links: make([][]int32, level+1)})
-	if x.entry < 0 {
-		x.entry, x.top = n, level
-		return
-	}
+// insert links the new node n, of the given level, into the graph, starting from the
+// entry point of the given top level (algorithm 1 of the paper). Other inserts walk the
+// graph at the same time.
+func (x *Index) insert(n int32, level int, entry int32, top int) {
+	v := x.node(n).vec
 	// Above the new node's level, a greedy walk: the closest node of each level is where
 	// the next one starts.
-	ep := []candidate{{x.entry, vec.Dot(v, x.nodes[x.entry].vec)}}
-	for l := x.top; l > level; l-- {
+	ep := []candidate{{entry, vec.Dot(v, x.node(entry).vec)}}
+	for l := top; l > level; l-- {
 		ep = x.searchLayer(v, ep, 1, l)
 	}
 	// On each level of the new node, the EfConstruction closest are the candidates for its
 	// links, and the start of the level below.
-	for l := min(level, x.top); l >= 0; l-- {
+	for l := min(level, top); l >= 0; l-- {
 		found := x.searchLayer(v, ep, x.cfg.EfConstruction, l)
 		links := x.selectNeighbors(found, x.maxLinks(l))
-		x.nodes[n].links[l] = links
+		own := x.node(n)
+		own.mu.Lock()
+		own.links[l] = links
+		own.mu.Unlock()
 		for _, to := range links {
 			x.link(to, n, l)
 		}
 		ep = found
 	}
-	if level > x.top {
-		x.entry, x.top = n, level
-	}
+}
+
+// linksOf returns a copy of the links of node id on level l, taken under its lock: the
+// walk reads the copy while other inserts change the links.
+func (x *Index) linksOf(id int32, l int) []int32 {
+	n := x.node(id)
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return slices.Clone(n.links[l])
 }
 
 // link adds a link from the node from to the node to on level l and, past the limit of
-// links, keeps the ones the heuristic picks among them.
+// links, keeps the ones the heuristic picks among them, all under the lock of from.
 func (x *Index) link(from, to int32, l int) {
-	n := &x.nodes[from]
+	n := x.node(from)
+	n.mu.Lock()
+	defer n.mu.Unlock()
 	n.links[l] = append(n.links[l], to)
 	if len(n.links[l]) <= x.maxLinks(l) {
 		return
 	}
 	found := make([]candidate, len(n.links[l]))
 	for i, id := range n.links[l] {
-		found[i] = candidate{id, vec.Dot(n.vec, x.nodes[id].vec)}
+		found[i] = candidate{id, vec.Dot(n.vec, x.node(id).vec)}
 	}
 	slices.SortFunc(found, closer)
 	n.links[l] = x.selectNeighbors(found, x.maxLinks(l))
@@ -91,12 +95,12 @@ func (x *Index) searchLayer(q []float32, ep []candidate, ef, l int) []candidate 
 		if worst, _ := found.Worst(); found.Len() == ef && closer(c, worst) > 0 {
 			break
 		}
-		for _, id := range x.nodes[c.id].links[l] {
+		for _, id := range x.linksOf(c.id, l) {
 			if visited[id] {
 				continue
 			}
 			visited[id] = true
-			next := candidate{id, vec.Dot(q, x.nodes[id].vec)}
+			next := candidate{id, vec.Dot(q, x.node(id).vec)}
 			if found.Offer(next) {
 				queue.push(next)
 			}
@@ -118,7 +122,7 @@ func (x *Index) selectNeighbors(found []candidate, limit int) []int32 {
 		}
 		diverse := true
 		for _, kept := range links {
-			if vec.Dot(x.nodes[c.id].vec, x.nodes[kept].vec) > c.score {
+			if vec.Dot(x.node(c.id).vec, x.node(kept).vec) > c.score {
 				diverse = false
 				break
 			}

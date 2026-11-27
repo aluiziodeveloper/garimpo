@@ -23,17 +23,24 @@ const (
 	wantRecall = 0.95
 )
 
-// build adds the vectors to a new graph and to the exact index, from workers goroutines
-// at once, and returns both and how long the graph took.
-func build(t *testing.T, cfg Config, vectors []shared.Vector, workers int) (*Index, *flatindex.Index, time.Duration) {
+// exactOf returns the exact index of the vectors, the chunk of vector i being
+// indextest.Chunk(i), as in build.
+func exactOf(t *testing.T, vectors []shared.Vector) *flatindex.Index {
 	t.Helper()
-	dim := vectors[0].Dim()
-	graph, exact := New(dim, cfg), flatindex.New(dim)
+	exact := flatindex.New(vectors[0].Dim())
 	for i, v := range vectors {
 		if err := exact.Add(indextest.Chunk(t, i), v); err != nil {
 			t.Fatal(err)
 		}
 	}
+	return exact
+}
+
+// build adds the vectors to a new graph from workers goroutines at once, and returns it
+// and how long it took.
+func build(t testing.TB, cfg Config, vectors []shared.Vector, workers int) (*Index, time.Duration) {
+	t.Helper()
+	graph := New(vectors[0].Dim(), cfg)
 	next := make(chan int)
 	var wg sync.WaitGroup
 	start := time.Now()
@@ -51,7 +58,7 @@ func build(t *testing.T, cfg Config, vectors []shared.Vector, workers int) (*Ind
 	}
 	close(next)
 	wg.Wait()
-	return graph, exact, time.Since(start)
+	return graph, time.Since(start)
 }
 
 // recallOf returns the share of the k best of each query, by the exact index, that the
@@ -95,8 +102,8 @@ func TestRecallAgainstTheExactIndex(t *testing.T) {
 	for i := range vectors {
 		vectors[i] = indextest.Vector(t, r, 32)
 	}
-	graph, exact, _ := build(t, Config{Seed: 6}, vectors[:2000], 4)
-	got, _ := recallOf(t, graph, exact, vectors[2000:])
+	graph, _ := build(t, Config{Seed: 6}, vectors[:2000], 4)
+	got, _ := recallOf(t, graph, exactOf(t, vectors[:2000]), vectors[2000:])
 	t.Logf("recall@%d = %.3f", recallK, got)
 	if got < wantRecall {
 		t.Fatalf("recall@%d = %.3f, want at least %.2f", recallK, got, wantRecall)
@@ -124,7 +131,8 @@ func TestRecallOnTheCorpus(t *testing.T) {
 		t.Fatalf("%s has %d vectors, want more than %d", path, len(vectors), queries)
 	}
 	workers := runtime.GOMAXPROCS(0)
-	graph, exact, took := build(t, Config{Seed: 7}, vectors[:len(vectors)-queries], workers)
+	graph, took := build(t, Config{Seed: 7}, vectors[:len(vectors)-queries], workers)
+	exact := exactOf(t, vectors[:len(vectors)-queries])
 	t.Logf("%d vectors of %d dimensions, %d queries; graph built by %d goroutines in %v",
 		len(vectors)-queries, vectors[0].Dim(), queries, workers, took.Round(time.Millisecond))
 
