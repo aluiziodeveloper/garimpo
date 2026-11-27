@@ -1,10 +1,14 @@
 // Package httpapi serves the searches of Garimpo over HTTP: the adapter that turns a request
 // into a call to the use case Search, with a deadline, and its results into JSON.
+//
+// The JSON is encoding/json/v2's (module 16): the texts, Go code, go out as they are, with
+// no escape for HTML; a list with no results is [], never null; and a text that is not valid
+// UTF-8 fails the response, where v1 would replace its bytes with U+FFFD and answer 200.
 package httpapi
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -45,8 +49,9 @@ type Error struct {
 // New returns the handler of GET /search?q=<query>&k=<results>. Every search has timeout
 // to answer, counted from when the request arrives: past it, the search is canceled and the
 // response is 504 Gateway Timeout. A client that leaves cancels its search, and gets no
-// response. A query or a k the use case refuses is 400 Bad Request; any other failure, 500.
-// log, when not nil, gets the failures of the server.
+// response. A query or a k the use case refuses is 400 Bad Request; any other failure,
+// including a response that cannot be JSON, 500. log, when not nil, gets the failures of the
+// server.
 func New(s Searcher, timeout time.Duration, log *slog.Logger) http.Handler {
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
@@ -65,13 +70,13 @@ type handler struct {
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	q, err := retrieval.NewQuery(r.URL.Query().Get("q"))
 	if err != nil {
-		write(w, http.StatusBadRequest, Error{err.Error()})
+		h.write(w, http.StatusBadRequest, Error{err.Error()})
 		return
 	}
 	k := DefaultK
 	if s := r.URL.Query().Get("k"); s != "" {
 		if k, err = strconv.Atoi(s); err != nil {
-			write(w, http.StatusBadRequest, Error{fmt.Sprintf("k %q is not a number", s)})
+			h.write(w, http.StatusBadRequest, Error{fmt.Sprintf("k %q is not a number", s)})
 			return
 		}
 	}
@@ -84,22 +89,33 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		for i, res := range results {
 			body.Results[i] = Result{Citation: res.Citation.String(), Score: res.Score, Text: res.Text}
 		}
-		write(w, http.StatusOK, body)
+		h.write(w, http.StatusOK, body)
 	case r.Context().Err() != nil:
 		// The client left: nobody reads a response. The search saw the cancel too.
 	case errors.Is(err, context.DeadlineExceeded):
-		write(w, http.StatusGatewayTimeout, Error{fmt.Sprintf("the search took more than %v", h.timeout)})
+		h.write(w, http.StatusGatewayTimeout, Error{fmt.Sprintf("the search took more than %v", h.timeout)})
 	case errors.Is(err, retrieval.ErrEmptyQuery), errors.Is(err, search.ErrInvalidK):
-		write(w, http.StatusBadRequest, Error{err.Error()})
+		h.write(w, http.StatusBadRequest, Error{err.Error()})
 	default:
 		h.log.Error("search failed", "query", q.String(), "k", k, "err", err)
-		write(w, http.StatusInternalServerError, Error{"the search failed"})
+		h.write(w, http.StatusInternalServerError, failed)
 	}
 }
 
-// write sends body as JSON with the status code.
-func write(w http.ResponseWriter, code int, body any) {
+// failed is the body of a 500: the cause goes to the log, not to the client.
+var failed = Error{"the search failed"}
+
+// write sends body as JSON with the status code. The body is encoded before the status is
+// sent: a body that cannot be JSON, such as a text that is not valid UTF-8, turns into a
+// 500, where encoding straight to w would have sent the 200 and half the body.
+func (h *handler) write(w http.ResponseWriter, code int, body any) {
+	out, err := json.Marshal(body)
+	if err != nil {
+		h.log.Error("encoding the response", "status", code, "err", err)
+		code = http.StatusInternalServerError
+		out, _ = json.Marshal(failed) // a struct of one ASCII string: it cannot fail
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(body) // the status is out: a failed write has nobody to tell
+	_, _ = w.Write(out) // the status is out: a failed write has nobody to tell
 }
