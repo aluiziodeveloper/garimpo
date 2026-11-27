@@ -204,8 +204,10 @@ func run(t *testing.T, newIndex func(t *testing.T, dim int) search.VectorIndex, 
 		if n := idx.Len(); n != adders*each {
 			t.Fatalf("Len() = %d after %d concurrent Adds", n, adders*each)
 		}
+		// Every vector is a query, so that an approximate index is judged on 600 of the best
+		// and not on a few: the graph that concurrent Adds build differs from run to run.
 		all := slices.Concat(vectors...)
-		for _, e := range all[:10] {
+		for _, e := range all {
 			c.check(t, all, e.v, find(t, idx, e.v, 3), 3)
 		}
 	})
